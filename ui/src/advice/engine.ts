@@ -54,6 +54,7 @@ export interface Advice {
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 const cap = (x: string) => x[0].toUpperCase() + x.slice(1);
+const ord = (n: number) => (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
 const r0 = (x: number) => Math.round(x);
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -199,6 +200,49 @@ export function analyzeSession(
       outcome:
         "Higher top speed where straights are long. Trade-off: slightly slower final-gear acceleration. Net gain on power tracks, marginal on twisty ones.",
     });
+  }
+
+  // ---- Gearing: ratio spacing (what to change per gear) --------------------
+  if (p.rules.shiftPoints && gearing.shifts.length > 0) {
+    const ratios = tune.gearRatios ?? [];
+    // Land near the power band after each shift; flag gears that drop too far / too little.
+    const targetLand = Math.round(gearing.peakPowerRpm * 0.88);
+    const cand = gearing.shifts
+      .map((sft) => {
+        const kCur = s.gears[sft.from]?.k ?? 0;
+        const kNext = s.gears[sft.to]?.k ?? 0;
+        if (kCur <= 0 || kNext <= 0) return null;
+        const landing = sft.rpm * (kNext / kCur);
+        const off = (landing - targetLand) / targetLand;
+        return { sft, landing, off };
+      })
+      .filter((x): x is { sft: { from: number; to: number; rpm: number }; landing: number; off: number } => !!x && Math.abs(x.off) >= 0.1)
+      .sort((a, b) => Math.abs(b.off) - Math.abs(a.off))
+      .slice(0, 2);
+
+    for (const c of cand) {
+      const tooTall = c.landing < targetLand; // drops below the band -> shorten upper gear
+      const factor = targetLand / c.landing; // multiply the upper gear's ratio by this
+      const pctChange = Math.round(Math.abs(factor - 1) * 100);
+      const cur = ratios[c.sft.to - 1];
+      const hasRatio = cur != null && Number.isFinite(cur);
+      out.push({
+        id: `gearing-ratio-${c.sft.to}`,
+        area: `Gearing — ${c.sft.to}${ord(c.sft.to)} gear`,
+        confidence: "medium",
+        kind: "fix",
+        recommendation: hasRatio
+          ? `${c.sft.to}${ord(c.sft.to)} gear ${r2(cur!)} → ~${r2(cur! * factor)}`
+          : `${tooTall ? "Shorten" : "Lengthen"} ${c.sft.to}${ord(c.sft.to)} gear ~${pctChange}%`,
+        why: `After upshifting ${c.sft.from}→${c.sft.to} you drop to ~${r0(c.landing)} rpm — ${tooTall ? "below" : "above"} the power band (peak power ${r0(gearing.peakPowerRpm)} rpm). The gap to ${c.sft.to}${ord(c.sft.to)} is too ${tooTall ? "big" : "small"}.`,
+        outcome: tooTall
+          ? "Lands you back near peak power for stronger acceleration out of each shift. Trade-off: you'll shift a touch more often."
+          : "Uses more of each gear with fewer shifts. Trade-off: slightly less punch right after the shift.",
+        viz: hasRatio
+          ? { kind: "delta", from: cur!, to: Math.round(cur! * factor * 100) / 100, min: 0, max: Math.max(5, cur! * 1.5), unit: "ratio" }
+          : { kind: "dir", dir: tooTall ? "more" : "less", label: tooTall ? "shorter gear" : "taller gear" },
+      });
+    }
   }
 
   // ---- Drag: launch traction + minimum aero --------------------------------
