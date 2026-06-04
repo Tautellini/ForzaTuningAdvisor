@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CurrentTune } from "../tune";
 import { TUNE_GROUPS, saveTune } from "../tune";
 import type { Units } from "../units";
@@ -18,8 +18,47 @@ function parseNum(raw: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-const GEAR_COUNTS = [4, 5, 6, 7, 8, 9, 10];
+// Module-level (stable identity) so the input keeps focus while typing, and it
+// owns its raw text so in-progress decimals like "3," / "3." aren't clobbered.
+function NumberField({
+  label,
+  value,
+  unit,
+  onChange,
+}: {
+  label: string;
+  value: number | undefined;
+  unit?: string;
+  onChange: (v: number | undefined) => void;
+}) {
+  const [text, setText] = useState(value != null ? String(value) : "");
+  useEffect(() => {
+    // resync only when the external value diverges from what we're showing
+    if (parseNum(text) !== value) setText(value != null ? String(value) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
+  return (
+    <label className={`tf ${value != null ? "set" : ""}`}>
+      <span className="tf-label">{label}</span>
+      <span className="tf-inputrow">
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="—"
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            onChange(parseNum(e.target.value));
+          }}
+        />
+        {unit && <span className="tf-unit">{unit}</span>}
+      </span>
+    </label>
+  );
+}
+
+const GEAR_COUNTS = [4, 5, 6, 7, 8, 9, 10];
 type ScalarKey = Exclude<keyof CurrentTune, "gearRatios" | "numGears">;
 
 export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
@@ -29,9 +68,8 @@ export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
     onChange(t);
     saveTune(t);
   };
-  const setField = (key: ScalarKey, raw: string) => {
+  const setField = (key: ScalarKey, v: number | undefined) => {
     const next = { ...tune };
-    const v = parseNum(raw);
     if (v === undefined) delete next[key];
     else (next[key] as number) = v;
     update(next);
@@ -41,33 +79,17 @@ export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
   const ratios = tune.gearRatios ?? [];
   const setNumGears = (n: number) =>
     update({ ...tune, numGears: n, gearRatios: (tune.gearRatios ?? []).slice(0, n) });
-  const setGear = (i: number, raw: string) => {
+  const setGear = (i: number, v: number | undefined) => {
     const r = (tune.gearRatios ?? []).slice();
     while (r.length < numGears) r.push(NaN);
-    const v = parseNum(raw);
     r[i] = v === undefined ? NaN : v;
     update({ ...tune, numGears, gearRatios: r });
   };
 
-  const Field = ({ k, label, unit }: { k: ScalarKey; label: string; unit: string }) => (
-    <label className={`tf ${tune[k] != null ? "set" : ""}`}>
-      <span className="tf-label">{label}</span>
-      <span className="tf-inputrow">
-        <input
-          type="text"
-          inputMode="decimal"
-          placeholder="—"
-          value={(tune[k] as number | undefined) ?? ""}
-          onChange={(e) => setField(k, e.target.value)}
-        />
-        {unit && <span className="tf-unit">{unit}</span>}
-      </span>
-    </label>
+  const setCount = TUNE_GROUPS.reduce(
+    (acc, g) => acc + g.fields.filter((f) => tune[f.key] != null).length,
+    0,
   );
-
-  const setCount = TUNE_GROUPS.reduce((acc, g) => {
-    return acc + g.fields.filter((f) => tune[f.key] != null).length;
-  }, 0);
 
   return (
     <section className="tunepanel2">
@@ -103,27 +125,23 @@ export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
                     </label>
                   </div>
                   <div className="tunegroup-fields">
-                    <Field k="finalDrive" label="Final drive" unit="ratio" />
+                    <NumberField
+                      label="Final drive"
+                      unit="ratio"
+                      value={tune.finalDrive}
+                      onChange={(v) => setField("finalDrive", v)}
+                    />
                     {Array.from({ length: numGears }, (_, i) => {
                       const val = ratios[i];
                       const has = val != null && Number.isFinite(val);
                       return (
-                        <label key={i} className={`tf ${has ? "set" : ""}`}>
-                          <span className="tf-label">
-                            {i + 1}
-                            {ordinal(i + 1)} gear
-                          </span>
-                          <span className="tf-inputrow">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="—"
-                              value={has ? String(val) : ""}
-                              onChange={(e) => setGear(i, e.target.value)}
-                            />
-                            <span className="tf-unit">ratio</span>
-                          </span>
-                        </label>
+                        <NumberField
+                          key={i}
+                          label={`${i + 1}${ordinal(i + 1)} gear`}
+                          unit="ratio"
+                          value={has ? val : undefined}
+                          onChange={(v) => setGear(i, v)}
+                        />
                       );
                     })}
                   </div>
@@ -139,7 +157,13 @@ export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
                 </div>
                 <div className="tunegroup-fields">
                   {fields.map((f) => (
-                    <Field key={f.key} k={f.key} label={f.label} unit={f.unit(units)} />
+                    <NumberField
+                      key={f.key}
+                      label={f.label}
+                      unit={f.unit(units)}
+                      value={tune[f.key] as number | undefined}
+                      onChange={(v) => setField(f.key, v)}
+                    />
                   ))}
                 </div>
                 {g.note && <div className="tg-note">{g.note}</div>}
