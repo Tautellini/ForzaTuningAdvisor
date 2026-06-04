@@ -321,22 +321,21 @@ body {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 6px 16px 16px;
+  padding: 16px;
+  margin-bottom: 16px;
 }
-.tune-toggle {
-  width: 100%;
+.tune-headrow {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: none;
-  border: none;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-  padding: 12px 0;
-  cursor: pointer;
+  margin-bottom: 4px;
 }
-.chev {
+.tune-headrow h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.tune-count {
+  font-size: 11px;
   color: var(--muted);
 }
 .tune-hint {
@@ -744,4 +743,282 @@ body {
   border-top: 1px solid var(--line);
   font-size: 12px;
   color: var(--muted);
+}
+
+/* ---- visualization cards ---- */
+.vizrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 860px) {
+  .vizrow {
+    grid-template-columns: 1fr;
+  }
+}
+.viz-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+}
+.viz-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.viz-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.viz-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+.viz-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 24px 0;
+  text-align: center;
+}
+.viz-legend {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.lg {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lg::before {
+  content: "";
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.lg-power {
+  color: var(--accent);
+}
+.lg-torque {
+  color: var(--amber);
+}
+.lg-shift {
+  color: var(--muted);
+}
+
+/* power curve */
+.powercurve {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.grid-line {
+  stroke: var(--line);
+  stroke-width: 1;
+  opacity: 0.4;
+}
+.axis-label {
+  fill: var(--muted);
+  font-size: 10px;
+}
+.power-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.torque-line {
+  fill: none;
+  stroke: var(--amber);
+  stroke-width: 1.5;
+  opacity: 0.85;
+}
+.peak-dot {
+  fill: var(--accent);
+  stroke: #04101f;
+  stroke-width: 1.5;
+}
+.shift-line {
+  stroke: #fff;
+  stroke-width: 1;
+  opacity: 0.22;
+  stroke-dasharray: 3 3;
+}
+.shift-label {
+  fill: var(--muted);
+  font-size: 9px;
+}
+.rpm-needle {
+  stroke: var(--green);
+  stroke-width: 2;
+}
+
+/* car view */
+.carview .car-svg {
+  width: 100%;
+  max-width: 250px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+.car-body {
+  fill: var(--panel-2);
+  stroke: var(--line);
+  stroke-width: 2;
+}
+.car-cabin {
+  fill: #0c0e12;
+  opacity: 0.6;
+}
+.drive-shaft {
+  stroke: var(--accent);
+  stroke-width: 3;
+  opacity: 0.4;
+  stroke-dasharray: 4 4;
+}
+.traction-ring {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+.traction-cross {
+  stroke: var(--line);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+.g-ball {
+  fill: var(--green);
+}
+.g-text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.susp-fill {
+  fill: #04101f;
+  opacity: 0.45;
+}
+.driven-dot {
+  fill: #04101f;
+}
+.wheel-temp {
+  fill: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.bal-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+.bal-neutral {
+  background: rgba(139, 147, 163, 0.18);
+  color: var(--muted);
+}
+.bal-under {
+  background: rgba(77, 163, 255, 0.18);
+  color: var(--accent);
+}
+.bal-over {
+  background: rgba(255, 77, 77, 0.18);
+  color: var(--red);
+}
+.car-foot {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.legend-spin {
+  color: var(--red);
+}
+.legend-lock {
+  color: var(--accent);
+}
+
+/* traction & brakes */
+.tb-group {
+  margin-top: 14px;
+}
+.tb-group:first-of-type {
+  margin-top: 0;
+}
+.tb-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.axlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.axlebar.is-muted {
+  opacity: 0.4;
+}
+.axle-label {
+  width: 42px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.axle-track {
+  flex: 1;
+  height: 10px;
+  background: var(--panel-2);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.axle-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+.axle-fill.spin {
+  background: var(--red);
+}
+.axle-fill.lock {
+  background: var(--accent);
+}
+.axle-val {
+  width: 36px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tb-note {
+  font-size: 11px;
+  margin-top: 2px;
+}
+.brake-balance {
+  margin-top: 10px;
+}
+.bb-track {
+  position: relative;
+  height: 8px;
+  background: linear-gradient(90deg, var(--accent), var(--panel-2), var(--red));
+  border-radius: 4px;
+}
+.bb-marker {
+  position: absolute;
+  top: -3px;
+  width: 4px;
+  height: 14px;
+  background: #fff;
+  border-radius: 2px;
+  transform: translateX(-2px);
+}
+.bb-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 3px;
 }

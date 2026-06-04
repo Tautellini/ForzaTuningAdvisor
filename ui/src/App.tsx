@@ -13,6 +13,9 @@ import { ConnectionBar } from "./components/ConnectionBar";
 import { SessionBar } from "./components/SessionBar";
 import { ModeSelector } from "./components/ModeSelector";
 import { Dashboard } from "./components/Dashboard";
+import { CarView } from "./components/CarView";
+import { PowerCurveChart } from "./components/PowerCurveChart";
+import { TractionBrakes } from "./components/TractionBrakes";
 import { AdvicePanel } from "./components/AdvicePanel";
 import { TunePanel } from "./components/TunePanel";
 import { PriorityBar } from "./components/PriorityBar";
@@ -65,8 +68,13 @@ export default function App() {
             <SessionBar summary={summary} onReset={reset} />
             <div className="topblock">
               {latest && <Dashboard t={latest} />}
-              <TunePanel tune={tune} onChange={setTune} />
+              {latest && <CarView t={latest} />}
             </div>
+            <div className="vizrow">
+              <PowerCurveChart summary={summary} liveRpm={latest?.rpm.cur ?? 0} />
+              <TractionBrakes summary={summary} tune={tune} />
+            </div>
+            <TunePanel tune={tune} onChange={setTune} />
             <div className="advice-wrap">
               <PriorityBar priorities={priorities} onChange={changePriorities} />
               <AdvicePanel advice={advice} enoughData={enoughData} />

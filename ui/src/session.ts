@@ -29,6 +29,8 @@ export interface SessionSummary {
   gears: Record<number, { k: number; wot: number; limiterFrac: number; maxSpeedKmh: number }>;
   // event fractions (0..1)
   wheelspinFrac: number;
+  frontSpinFrac: number; // per-axle wheelspin (so AWD shows both)
+  rearSpinFrac: number;
   drivenAxle: "front" | "rear" | "all";
   frontLockFrac: number;
   rearLockFrac: number;
@@ -65,6 +67,8 @@ export class SessionAggregator {
 
   private powerFrames = 0;
   private spinFrames = 0;
+  private frontSpin = 0;
+  private rearSpin = 0;
   private brakingFrames = 0;
   private frontLock = 0;
   private rearLock = 0;
@@ -94,6 +98,8 @@ export class SessionAggregator {
     this.gears.clear();
     this.powerFrames = 0;
     this.spinFrames = 0;
+    this.frontSpin = 0;
+    this.rearSpin = 0;
     this.brakingFrames = 0;
     this.frontLock = 0;
     this.rearLock = 0;
@@ -160,12 +166,16 @@ export class SessionAggregator {
       }
     }
 
-    // wheelspin (driven axle)
+    // wheelspin (driven axle + per axle)
     if (f.throttle >= 0.6 && f.speed > 4) {
       this.powerFrames++;
       const driven = this.drivenKeys();
       const slip = driven.reduce((a, k) => a + Math.abs(f.tires[k].slipRatio), 0) / driven.length;
       if (slip >= 0.18) this.spinFrames++;
+      const fSlip = (Math.abs(f.tires.fl.slipRatio) + Math.abs(f.tires.fr.slipRatio)) / 2;
+      const rSlip = (Math.abs(f.tires.rl.slipRatio) + Math.abs(f.tires.rr.slipRatio)) / 2;
+      if (fSlip >= 0.18) this.frontSpin++;
+      if (rSlip >= 0.18) this.rearSpin++;
     }
 
     // braking lockup
@@ -264,6 +274,8 @@ export class SessionAggregator {
       redline: this.redline,
       gears,
       wheelspinFrac: this.powerFrames > 0 ? this.spinFrames / this.powerFrames : 0,
+      frontSpinFrac: this.powerFrames > 0 ? this.frontSpin / this.powerFrames : 0,
+      rearSpinFrac: this.powerFrames > 0 ? this.rearSpin / this.powerFrames : 0,
       drivenAxle,
       frontLockFrac: this.brakingFrames > 0 ? this.frontLock / this.brakingFrames : 0,
       rearLockFrac: this.brakingFrames > 0 ? this.rearLock / this.brakingFrames : 0,

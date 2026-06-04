@@ -1,6 +1,5 @@
 import type { Telemetry } from "../types";
 import { DRIVETRAIN } from "../types";
-import { TireGrid } from "./TireGrid";
 
 const mps2kmh = (v: number) => Math.round(v * 3.6);
 
@@ -48,8 +47,6 @@ export function Dashboard({ t }: { t: Telemetry }) {
         <Stat label="Fuel" value={`${Math.round(t.fuel * 100)}%`} />
         <Stat label="Lat. accel" value={`${(t.accel.x / 9.81).toFixed(2)} g`} />
       </div>
-
-      <TireGrid tires={t.tires} />
     </section>
   );
 }

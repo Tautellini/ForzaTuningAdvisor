@@ -51,6 +51,47 @@ function optimalShiftRpm(
   return redline;
 }
 
+export interface GearingAnalysis {
+  hasCurve: boolean;
+  peakPowerRpm: number;
+  peakTorqueRpm: number;
+  redline: number;
+  shifts: { from: number; to: number; rpm: number }[];
+}
+
+/** Shared gearing math used by both the advice engine and the power-curve chart. */
+export function gearingAnalysis(s: SessionSummary | null): GearingAnalysis {
+  const empty: GearingAnalysis = {
+    hasCurve: false,
+    peakPowerRpm: 0,
+    peakTorqueRpm: 0,
+    redline: 0,
+    shifts: [],
+  };
+  if (!s || s.powerCurve.length < MIN.curve || s.peakPowerRpm <= 0) return empty;
+  const gearNums = Object.keys(s.gears)
+    .map(Number)
+    .filter((g) => s.gears[g].k > 0)
+    .sort((a, b) => a - b);
+  const shifts: GearingAnalysis["shifts"] = [];
+  for (let i = 0; i < gearNums.length - 1; i++) {
+    const g = gearNums[i];
+    const next = gearNums[i + 1];
+    if (next !== g + 1) continue;
+    const drop = s.gears[next].k / s.gears[g].k;
+    if (drop <= 0 || drop >= 1) continue;
+    const R = optimalShiftRpm(s.powerCurve, s.redline || s.maxRpm, s.peakPowerRpm, drop);
+    shifts.push({ from: g, to: next, rpm: r0(R / 50) * 50 });
+  }
+  return {
+    hasCurve: true,
+    peakPowerRpm: s.peakPowerRpm,
+    peakTorqueRpm: s.peakTorqueRpm,
+    redline: s.redline || s.maxRpm,
+    shifts,
+  };
+}
+
 export function analyzeSession(
   s: SessionSummary | null,
   tune: CurrentTune,
@@ -70,34 +111,18 @@ export function analyzeSession(
     .map(Number)
     .filter((g) => s.gears[g].k > 0)
     .sort((a, b) => a - b);
-  if (
-    p.rules.shiftPoints &&
-    s.powerCurve.length >= MIN.curve &&
-    s.peakPowerRpm > 0 &&
-    gearNums.length >= MIN.gearPair
-  ) {
-    const shifts: string[] = [];
-    for (let i = 0; i < gearNums.length - 1; i++) {
-      const g = gearNums[i];
-      const next = gearNums[i + 1];
-      if (next !== g + 1) continue;
-      const drop = s.gears[next].k / s.gears[g].k;
-      if (drop <= 0 || drop >= 1) continue;
-      const R = optimalShiftRpm(s.powerCurve, s.redline || s.maxRpm, s.peakPowerRpm, drop);
-      shifts.push(`${g}→${next}: ${r0(R / 50) * 50} rpm`);
-    }
-    if (shifts.length > 0) {
-      out.push({
-        id: "gearing-shift-points",
-        area: "Gearing — shift points",
-        confidence: "high",
-        kind: "fix",
-        recommendation: `Upshift at — ${shifts.join("   ·   ")}`,
-        why: `Built from your measured power curve this session: peak power ≈ ${r0(s.peakPowerRpm)} rpm, peak torque ≈ ${r0(s.peakTorqueRpm)} rpm, redline ≈ ${r0(s.redline)} rpm. Shifting here keeps you in the strongest part of the curve after each shift.`,
-        outcome:
-          "More acceleration out of every gear. Trade-off: none, as long as the power curve is accurate (drive a bit more to refine it).",
-      });
-    }
+  const gearing = gearingAnalysis(s);
+  if (p.rules.shiftPoints && gearing.shifts.length > 0) {
+    out.push({
+      id: "gearing-shift-points",
+      area: "Gearing — shift points",
+      confidence: "high",
+      kind: "fix",
+      recommendation: `Upshift at — ${gearing.shifts.map((x) => `${x.from}→${x.to}: ${x.rpm} rpm`).join("   ·   ")}`,
+      why: `Built from your measured power curve this session: peak power ≈ ${r0(gearing.peakPowerRpm)} rpm, peak torque ≈ ${r0(gearing.peakTorqueRpm)} rpm, redline ≈ ${r0(gearing.redline)} rpm. Shifting here keeps you in the strongest part of the curve after each shift.`,
+      outcome:
+        "More acceleration out of every gear. Trade-off: none, as long as the power curve is accurate (drive a bit more to refine it).",
+    });
   }
 
   // ---- Gearing: hitting limiter in the top gear ----------------------------
