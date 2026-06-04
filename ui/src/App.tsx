@@ -1,22 +1,28 @@
 import { useMemo, useState } from "react";
 import { useTelemetry } from "./useTelemetry";
-import { analyze } from "./advice/engine";
+import { analyzeSession } from "./advice/engine";
+import { loadTune, type CurrentTune } from "./tune";
 import { ConnectionBar } from "./components/ConnectionBar";
+import { SessionBar } from "./components/SessionBar";
 import { Dashboard } from "./components/Dashboard";
 import { AdvicePanel } from "./components/AdvicePanel";
+import { TunePanel } from "./components/TunePanel";
 
 const DEFAULT_URL = "ws://127.0.0.1:5301";
 const URL_KEY = "fta.bridgeUrl";
 
 export default function App() {
   const [url, setUrl] = useState(() => localStorage.getItem(URL_KEY) ?? DEFAULT_URL);
-  const { conn, latest, history, driving, hz } = useTelemetry(url);
-  const advice = useMemo(() => analyze(history), [history]);
+  const [tune, setTune] = useState<CurrentTune>(() => loadTune());
+  const { conn, latest, driving, hz, summary, reset } = useTelemetry(url);
+  const advice = useMemo(() => analyzeSession(summary, tune), [summary, tune]);
 
   const changeUrl = (u: string) => {
     setUrl(u);
     localStorage.setItem(URL_KEY, u);
   };
+
+  const enoughData = (summary?.drivingFrames ?? 0) >= 120;
 
   return (
     <div className="app">
@@ -27,12 +33,18 @@ export default function App() {
           <SetupHelp url={url} />
         ) : !latest ? (
           <Waiting message="Connected to the bridge — waiting for the first telemetry packet…" />
-        ) : !driving && history.length === 0 ? (
+        ) : !summary && !driving ? (
           <Waiting message="Connected. Jump into a drive in Forza and your data will show up here." />
         ) : (
-          <div className="content">
-            {latest && <Dashboard t={latest} />}
-            <AdvicePanel advice={advice} enoughData={history.length >= 30} />
+          <div className="content-wrap">
+            <SessionBar summary={summary} onReset={reset} />
+            <div className="content">
+              <div className="left-col">
+                {latest && <Dashboard t={latest} />}
+                <TunePanel tune={tune} onChange={setTune} />
+              </div>
+              <AdvicePanel advice={advice} enoughData={enoughData} />
+            </div>
           </div>
         )}
       </main>

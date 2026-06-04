@@ -21,15 +21,18 @@ export function AdvicePanel({ advice, enoughData }: { advice: Advice[]; enoughDa
     <aside className="advice">
       <h2>
         Tuning advice
-        <span className="advice-sub">directional cues from your driving</span>
+        <span className="advice-sub">based on your whole session — drive more to sharpen it</span>
       </h2>
 
       {!enoughData ? (
-        <div className="advice-empty">Drive for a few seconds and advice will appear here.</div>
+        <div className="advice-empty">
+          Keep driving — push through some corners, braking zones, and full-throttle pulls. Advice
+          builds up as the session gathers data.
+        </div>
       ) : sorted.length === 0 ? (
         <div className="advice-empty">
-          Nothing obvious to flag right now — the car looks reasonably balanced for how you're
-          driving. Push harder (corners, braking, full throttle) to surface more.
+          Nothing obvious to flag yet — the car looks reasonably balanced for how you've driven so
+          far. Drive harder to surface more.
         </div>
       ) : (
         <ul className="advice-list">
@@ -39,6 +42,7 @@ export function AdvicePanel({ advice, enoughData }: { advice: Advice[]; enoughDa
                 <span className="advice-area">{a.area}</span>
                 <span className={`badge ${BADGE[a.confidence]}`}>{BADGE_TEXT[a.confidence]}</span>
               </div>
+              {a.value && <div className="advice-value">{a.value}</div>}
               <p className="advice-msg">{a.message}</p>
               {a.detail && <p className="advice-detail">{a.detail}</p>}
             </li>
@@ -47,8 +51,9 @@ export function AdvicePanel({ advice, enoughData }: { advice: Advice[]; enoughDa
       )}
 
       <p className="advice-foot">
-        Camber/toe advice isn't shown — Forza's telemetry only reports one temperature per tire, so
-        that can't be inferred honestly from this feed.
+        Concrete numbers come from your data (gearing, brake balance). For springs, ARBs, pressures
+        etc. enter your current tune to get target values. Camber/toe isn't shown — the feed reports
+        only one temperature per tire.
       </p>
     </aside>
   );
