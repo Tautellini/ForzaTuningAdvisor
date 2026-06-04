@@ -2,9 +2,16 @@ import type { SessionSummary } from "../session";
 import type { CurrentTune } from "../tune";
 import type { DisciplineProfile } from "../discipline";
 import type { PriorityId } from "../priorities";
+import type { TuneSnapshot } from "../tuninglog";
 
 export type Confidence = "high" | "medium" | "low";
 export type AdviceKind = "fix" | "opportunity";
+
+export type AdviceViz =
+  | { kind: "balance"; ratio: number } // front/rear slip ratio; 1 = neutral
+  | { kind: "bar"; value: number; tone: "spin" | "lock" | "warn" | "good" } // 0..1
+  | { kind: "delta"; from: number | null; to: number; min: number; max: number; unit?: string }
+  | { kind: "dir"; dir: "more" | "less"; label: string };
 
 export interface Advice {
   id: string;
@@ -14,6 +21,8 @@ export interface Advice {
   recommendation: string; // the action (includes concrete numbers when available)
   why: string; // evidence from the session data
   outcome: string; // expected result + trade-off
+  viz?: AdviceViz;
+  trend?: string; // loop feedback vs the previous tuning-log snapshot
 }
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
@@ -97,9 +106,12 @@ export function analyzeSession(
   tune: CurrentTune,
   p: DisciplineProfile,
   priorities: PriorityId[],
+  prev?: TuneSnapshot | null,
 ): Advice[] {
   if (!s || s.drivingFrames < MIN.frames) return [];
   const out: Advice[] = [];
+  // Loop feedback only makes sense against the same discipline.
+  const last = prev && prev.discipline === p.id ? prev : null;
   const rankOf = (id: PriorityId) => {
     const i = priorities.indexOf(id);
     return i < 0 ? 99 : i;
@@ -166,6 +178,7 @@ export function analyzeSession(
       why: `The driven wheels spin in ${pct(s.wheelspinFrac)} of on-power frames — that's wasted grip off the line.`,
       outcome:
         "Quicker launch and lower ET. Trade-off: go too soft and it bogs instead of spinning — dial to the edge of traction.",
+      viz: { kind: "bar", value: s.wheelspinFrac, tone: "spin" },
     });
   }
   if (p.id === "drag") {
@@ -197,6 +210,10 @@ export function analyzeSession(
         why: `Front wheels lock in ${pct(s.frontLockFrac)} of braking — when they lock you can't steer and you flat-spot the tires.`,
         outcome:
           "You can brake later and still turn in. Trade-off: shift too far and the rears start to lock instead.",
+        viz:
+          tune.brakeBalance != null
+            ? { kind: "delta", from: tune.brakeBalance, to: clamp(tune.brakeBalance - shift, 0, 100), min: 0, max: 100, unit: "% front" }
+            : { kind: "bar", value: s.frontLockFrac, tone: "lock" },
       });
     } else if (s.rearLockFrac >= p.thr.lockup && s.rearLockFrac > s.frontLockFrac) {
       const shift = clamp(r0(s.rearLockFrac * 20), 2, 10);
@@ -212,6 +229,10 @@ export function analyzeSession(
         recommendation: rec,
         why: `Rear wheels lock in ${pct(s.rearLockFrac)} of braking — that can step the back end out under braking.`,
         outcome: "More stable braking. Trade-off: shift too far forward and the fronts start to lock.",
+        viz:
+          tune.brakeBalance != null
+            ? { kind: "delta", from: tune.brakeBalance, to: clamp(tune.brakeBalance + shift, 0, 100), min: 0, max: 100, unit: "% front" }
+            : { kind: "bar", value: s.rearLockFrac, tone: "lock" },
       });
     }
   }
@@ -232,6 +253,10 @@ export function analyzeSession(
       why: `The ${s.drivenAxle} axle spins up in ${pct(s.wheelspinFrac)} of on-power frames — more than ideal for ${p.label.toLowerCase()}.`,
       outcome:
         "Cleaner drive off corners, more usable power. Trade-off: too low and the inside wheel spins on power instead — find where it just hooks.",
+      viz:
+        tune.diffAccel != null
+          ? { kind: "delta", from: tune.diffAccel, to: clamp(tune.diffAccel - drop, 0, 100), min: 0, max: 100, unit: "%" }
+          : { kind: "bar", value: s.wheelspinFrac, tone: "spin" },
     });
   }
 
@@ -257,46 +282,79 @@ export function analyzeSession(
           outcome: p.preferHigherRide
             ? "Soaks up the hits without bottoming. Trade-off: a stiffer end has slightly less mechanical grip."
             : "Stops the harsh bottoming. Trade-off: raising height lifts the CoG a touch (minor at this scale).",
+          viz: { kind: "bar", value: s.bottoming[end], tone: "warn" },
         });
         break;
       }
     }
   }
 
-  // ---- Handling balance: under / oversteer ---------------------------------
+  // ---- Handling balance: under / oversteer (adaptive + loop feedback) -------
   if (p.rules.balance && s.corneringFrames >= MIN.cornering) {
     if (s.understeerRatio >= p.thr.understeerHigh) {
-      const step = clamp(r0((s.understeerRatio - 1) * 10), 2, 15);
-      const rec =
-        tune.frontARB != null
-          ? `Front ARB ${r0(tune.frontARB)} → ~${r0(clamp(tune.frontARB - step, 1, 65))}`
-          : `Soften front ARB (or stiffen rear)`;
+      const sev = s.understeerRatio - 1;
+      let stepMul = 1;
+      let trend: string | undefined;
+      if (last) {
+        const was = last.m.understeerRatio;
+        const improved = was - s.understeerRatio;
+        if (was >= p.thr.understeerHigh) {
+          if (improved < 0.08) {
+            stepMul = 1.7;
+            trend = `Barely moved since your last change (was ${r1(was)}, now ${r1(s.understeerRatio)}). The front ARB may not be the limiter — take a bigger step, or add front grip (softer front springs / more front tire).`;
+          } else {
+            trend = `Improving — front/rear balance went ${r1(was)} → ${r1(s.understeerRatio)}. Keep going, a touch more.`;
+          }
+        }
+      }
+      const step = clamp(r0(sev * 12 * stepMul), 3, 22);
       out.push({
         id: "balance-understeer",
         area: "Handling balance",
         confidence: "medium",
         kind: "fix",
-        recommendation: rec,
+        recommendation:
+          tune.frontARB != null
+            ? `Front ARB ${r0(tune.frontARB)} → ~${r0(clamp(tune.frontARB - step, 1, 65))} (−${step})`
+            : `Soften front ARB by ~${step} (or stiffen rear)`,
         why: `In corners your front slip angle is ≈ ${r1(s.understeerRatio)}× the rear — the front gives up first, so the car pushes wide.`,
         outcome:
-          "Sharper turn-in and more front grip mid-corner. Trade-off: overdo it and the car swings to oversteer.",
+          "Sharper turn-in and more front grip mid-corner. Trade-off: overdo it and it swings to oversteer.",
+        viz: { kind: "balance", ratio: s.understeerRatio },
+        trend,
       });
     } else if (s.understeerRatio > 0 && s.understeerRatio <= p.thr.oversteerLow) {
       const ratio = 1 / s.understeerRatio;
-      const step = clamp(r0((ratio - 1) * 10), 2, 15);
-      const rec =
-        tune.frontARB != null
-          ? `Front ARB ${r0(tune.frontARB)} → ~${r0(clamp(tune.frontARB + step, 1, 65))}`
-          : `Stiffen front ARB (or soften rear)`;
+      const sev = ratio - 1;
+      let stepMul = 1;
+      let trend: string | undefined;
+      if (last) {
+        const wasR = last.m.understeerRatio > 0 ? 1 / last.m.understeerRatio : 1;
+        const improved = wasR - ratio;
+        if (last.m.understeerRatio <= p.thr.oversteerLow) {
+          if (improved < 0.08) {
+            stepMul = 1.7;
+            trend = `Barely moved since your last change. Take a bigger step on the front ARB, or soften the rear / ease diff acceleration.`;
+          } else {
+            trend = `Improving — keep going, a touch more.`;
+          }
+        }
+      }
+      const step = clamp(r0(sev * 12 * stepMul), 3, 22);
       out.push({
         id: "balance-oversteer",
         area: "Handling balance",
         confidence: "medium",
         kind: "fix",
-        recommendation: rec,
+        recommendation:
+          tune.frontARB != null
+            ? `Front ARB ${r0(tune.frontARB)} → ~${r0(clamp(tune.frontARB + step, 1, 65))} (+${step})`
+            : `Stiffen front ARB by ~${step} (or soften rear)`,
         why: `In corners your rear slip angle is ≈ ${r1(ratio)}× the front — the rear lets go first, making the car loose.`,
         outcome:
           "More stable rear, easier to get on power. Trade-off: too much and it turns into understeer.",
+        viz: { kind: "balance", ratio: s.understeerRatio },
+        trend,
       });
     }
   }
@@ -316,6 +374,7 @@ export function analyzeSession(
         why: `You're at the grip limit in ${pct(s.highSpeedNearLimitFrac)} of fast corners (>108 km/h), peaking around ${r1(s.maxLatG)}g${balance ? "; and the balance is off at speed" : ""}.`,
         outcome:
           "More high-speed grip and stability through fast corners. Trade-off: more drag, so a little less top speed.",
+        viz: { kind: "dir", dir: "more", label: "downforce" },
       });
     } else if (s.highSpeedNearLimitFrac < 0.2 && topIs("topSpeed")) {
       out.push({
@@ -327,6 +386,7 @@ export function analyzeSession(
         why: `You only reach the grip limit in ${pct(s.highSpeedNearLimitFrac)} of fast corners — there's aero grip you're not using, and wing is costing you drag.`,
         outcome:
           "Higher top speed and better straight-line lap time. Trade-off: less margin in fast corners — back it off gradually.",
+        viz: { kind: "dir", dir: "less", label: "downforce" },
       });
     }
   }
@@ -391,6 +451,7 @@ export function analyzeSession(
       recommendation: rec,
       why: `You reach the grip limit in only ${pct(s.nearLimitFrac)} of corners (peak ${r1(s.maxLatG)}g) — the tires have more to give than you're using.`,
       outcome,
+      viz: { kind: "bar", value: s.nearLimitFrac, tone: "good" },
     });
   }
 
@@ -413,6 +474,11 @@ export function analyzeSession(
         why: `${hot.map((k) => `${k.toUpperCase()} avg ${r0(s.tireTempAvg[k])}°F`).join(", ")} — those tires run hottest, so they're working hardest.`,
         outcome:
           "Cooler, more consistent tires. Note: the feed can't read pressure, so this is a hint, not a measured value.",
+        viz: {
+          kind: "bar",
+          value: clamp((Math.max(...hot.map((k) => s.tireTempAvg[k])) - 150) / 110, 0, 1),
+          tone: "warn",
+        },
       });
     }
   }

@@ -9,12 +9,14 @@ import {
   type DisciplineId,
 } from "./discipline";
 import { loadPriorities, savePriorities, type PriorityId } from "./priorities";
+import { appendLog, clearLog, loadLog, metricsFrom, type TuneSnapshot } from "./tuninglog";
 import { ConnectionBar } from "./components/ConnectionBar";
 import { SessionBar } from "./components/SessionBar";
 import { ModeSelector } from "./components/ModeSelector";
 import { LivePanel } from "./components/LivePanel";
 import { PowerCurveChart } from "./components/PowerCurveChart";
 import { TractionBrakes } from "./components/TractionBrakes";
+import { TuningLog } from "./components/TuningLog";
 import { AdvicePanel } from "./components/AdvicePanel";
 import { TunePanel } from "./components/TunePanel";
 import { PriorityBar } from "./components/PriorityBar";
@@ -27,13 +29,23 @@ export default function App() {
   const [tune, setTune] = useState<CurrentTune>(() => loadTune());
   const [discipline, setDiscipline] = useState<DisciplineId>(() => loadDiscipline());
   const [priorities, setPriorities] = useState<PriorityId[]>(() => loadPriorities());
-  const { conn, latest, driving, hz, summary, reset } = useTelemetry(url);
+  const [log, setLog] = useState<TuneSnapshot[]>(() => loadLog());
+  const { conn, latest, driving, hz, summary, recent, reset } = useTelemetry(url);
   const profile = DISCIPLINE_BY_ID[discipline];
+
+  // Advice reads the recent window once it has ~10s of data (reacts to tune
+  // changes mid-session), else falls back to the cumulative session.
+  const liveSummary = recent && recent.drivingFrames >= 600 ? recent : summary;
+  const prev = log.length > 0 ? log[log.length - 1] : null;
   const advice = useMemo(
-    () => analyzeSession(summary, tune, profile, priorities),
-    [summary, tune, profile, priorities],
+    () => analyzeSession(liveSummary, tune, profile, priorities, prev),
+    [liveSummary, tune, profile, priorities, prev],
   );
 
+  const changeUrl = (u: string) => {
+    setUrl(u);
+    localStorage.setItem(URL_KEY, u);
+  };
   const changeDiscipline = (id: DisciplineId) => {
     setDiscipline(id);
     saveDiscipline(id);
@@ -42,13 +54,23 @@ export default function App() {
     setPriorities(p);
     savePriorities(p);
   };
-
-  const changeUrl = (u: string) => {
-    setUrl(u);
-    localStorage.setItem(URL_KEY, u);
+  const handleReset = () => {
+    if (summary && summary.drivingFrames > 120) {
+      setLog(
+        appendLog({
+          t: Date.now(),
+          durationS: summary.durationS,
+          samples: summary.drivingFrames,
+          discipline,
+          tune: { ...tune },
+          m: metricsFrom(summary),
+        }),
+      );
+    }
+    reset();
   };
 
-  const enoughData = (summary?.drivingFrames ?? 0) >= 120;
+  const enoughData = (liveSummary?.drivingFrames ?? 0) >= 120;
 
   return (
     <div className="app">
@@ -64,12 +86,13 @@ export default function App() {
         ) : (
           <div className="content-wrap">
             <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
-            <SessionBar summary={summary} onReset={reset} />
+            <SessionBar summary={summary} onReset={handleReset} />
             {latest && <LivePanel t={latest} />}
             <div className="vizrow">
               <PowerCurveChart summary={summary} liveRpm={latest?.rpm.cur ?? 0} />
               <TractionBrakes summary={summary} tune={tune} />
             </div>
+            <TuningLog log={log} onClear={() => setLog(clearLog())} />
             <TunePanel tune={tune} onChange={setTune} />
             <div className="advice-wrap">
               <PriorityBar priorities={priorities} onChange={changePriorities} />
