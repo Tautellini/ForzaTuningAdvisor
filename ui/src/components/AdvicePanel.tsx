@@ -165,8 +165,9 @@ function round(x: number) {
 
 function AdviceCard({ a }: { a: Advice }) {
   const [open, setOpen] = useState(false);
+  const state = a.kind === "opportunity" || a.confidence === "low" ? "neutral" : "change";
   return (
-    <li className="adv">
+    <li className={`adv adv-${state}`}>
       <div className="adv-head">
         <span className="adv-area">{a.area}</span>
         <span className={`conf-dot ${a.confidence}`} title={CONF_TEXT[a.confidence]} />

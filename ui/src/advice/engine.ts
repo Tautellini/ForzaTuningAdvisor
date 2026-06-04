@@ -157,15 +157,20 @@ export function analyzeSession(
       speed: Math.round(s.gears[g].maxSpeedKmh * sf.f),
       shift: shiftByFrom.get(g),
     }));
+    const allAtRedline = gearing.shifts.every((x) => x.rpm >= gearing.redline - 150);
     out.push({
       id: "gearing-shift-points",
       area: "Gearing — shift points",
       confidence: "high",
       kind: "fix",
-      recommendation: `Upshift at — ${gearing.shifts.map((x) => `${x.from}→${x.to}: ${x.rpm} rpm`).join("   ·   ")}`,
-      why: `Built from your measured power curve this session: peak power ≈ ${r0(gearing.peakPowerRpm)} rpm, peak torque ≈ ${r0(gearing.peakTorqueRpm)} rpm, redline ≈ ${r0(gearing.redline)} rpm. Shifting here keeps you in the strongest part of the curve after each shift.`,
+      recommendation: allAtRedline
+        ? `Pull every gear to the rev limiter (~${r0(gearing.redline)} rpm) before shifting`
+        : `Upshift at — ${gearing.shifts.map((x) => `${x.from}→${x.to} ${x.rpm} rpm`).join("   ·   ")}`,
+      why: allAtRedline
+        ? `Your engine keeps making power right up to the limiter (peak power ≈ ${r0(gearing.peakPowerRpm)} rpm, redline ≈ ${r0(gearing.redline)} rpm), so short-shifting loses acceleration. If you expected an earlier shift, do a clean full-throttle pull through every gear so the power curve is fully sampled.`
+        : `From your measured power curve: peak power ≈ ${r0(gearing.peakPowerRpm)} rpm, peak torque ≈ ${r0(gearing.peakTorqueRpm)} rpm, redline ≈ ${r0(gearing.redline)} rpm. Each shift point is where the next gear starts out-pulling the current one.`,
       outcome:
-        "More acceleration out of every gear. Trade-off: none, as long as the power curve is accurate (drive a bit more to refine it).",
+        "Most acceleration out of every gear. Trade-off: none if the power curve is well sampled — drive more full-throttle pulls to refine it.",
       viz: { kind: "gears", unit: sf.unit, redline: gearing.redline, gears: gearsViz },
     });
   }
