@@ -89,6 +89,25 @@ function Viz({ v }: { v: AdviceViz }) {
       </div>
     );
   }
+  if (v.kind === "gears") {
+    const max = Math.max(1, ...v.gears.map((g) => g.speed));
+    return (
+      <div className="chg gears-viz">
+        {v.gears.map((g) => (
+          <div className="gv-row" key={g.g}>
+            <span className="gv-g">{g.g}</span>
+            <div className="gv-bar">
+              <div className="gv-fill" style={{ width: `${(g.speed / max) * 100}%` }} />
+            </div>
+            <span className="gv-kmh">
+              {g.speed} {v.unit}
+            </span>
+            {g.shift != null && <span className="gv-shift">↑{(g.shift / 1000).toFixed(1)}k</span>}
+          </div>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className={`chg viz-dir dir-${v.dir}`}>
       <span className="vd-arrow">{v.dir === "more" ? "▲" : "▼"}</span>

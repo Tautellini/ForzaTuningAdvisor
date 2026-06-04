@@ -25,6 +25,7 @@ function groupForId(id: string): AdviceGroup {
   if (id === "drag-aero" || id.startsWith("aero")) return "aero";
   if (id.startsWith("brake")) return "brakes";
   if (id.startsWith("diff") || id.startsWith("drift") || id === "drag-launch") return "diff";
+  if (id.startsWith("damping")) return "damping";
   if (id.startsWith("bottoming") || id.startsWith("unload")) return "springs";
   if (id.startsWith("balance")) return "arb";
   if (id.startsWith("tire")) return "tires";
@@ -35,7 +36,8 @@ export type AdviceViz =
   | { kind: "balance"; ratio: number } // front/rear slip ratio; 1 = neutral
   | { kind: "bar"; value: number; tone: "spin" | "lock" | "warn" | "good" } // 0..1
   | { kind: "delta"; from: number | null; to: number; min: number; max: number; unit?: string }
-  | { kind: "dir"; dir: "more" | "less"; label: string };
+  | { kind: "dir"; dir: "more" | "less"; label: string }
+  | { kind: "gears"; unit: string; redline: number; gears: { g: number; speed: number; shift?: number }[] };
 
 export interface Advice {
   id: string;
@@ -148,6 +150,13 @@ export function analyzeSession(
     .sort((a, b) => a - b);
   const gearing = gearingAnalysis(s);
   if (p.rules.shiftPoints && gearing.shifts.length > 0) {
+    const shiftByFrom = new Map(gearing.shifts.map((x) => [x.from, x.rpm]));
+    const sf = u.system === "imperial" ? { f: 0.621371, unit: "mph" } : { f: 1, unit: "km/h" };
+    const gearsViz = gearNums.map((g) => ({
+      g,
+      speed: Math.round(s.gears[g].maxSpeedKmh * sf.f),
+      shift: shiftByFrom.get(g),
+    }));
     out.push({
       id: "gearing-shift-points",
       area: "Gearing — shift points",
@@ -157,6 +166,7 @@ export function analyzeSession(
       why: `Built from your measured power curve this session: peak power ≈ ${r0(gearing.peakPowerRpm)} rpm, peak torque ≈ ${r0(gearing.peakTorqueRpm)} rpm, redline ≈ ${r0(gearing.redline)} rpm. Shifting here keeps you in the strongest part of the curve after each shift.`,
       outcome:
         "More acceleration out of every gear. Trade-off: none, as long as the power curve is accurate (drive a bit more to refine it).",
+      viz: { kind: "gears", unit: sf.unit, redline: gearing.redline, gears: gearsViz },
     });
   }
 
@@ -420,6 +430,30 @@ export function analyzeSession(
         viz: { kind: "dir", dir: "less", label: "downforce" },
       });
     }
+  }
+
+  // ---- Damping: oscillation -> rebound (low confidence) --------------------
+  if (p.rules.damping && s.drivingFrames >= 400) {
+    const dampCard = (axle: "front" | "rear", rate: number, key: "frontRebound" | "rearRebound") => {
+      if (rate < 2.5) return;
+      const cur = tune[key];
+      out.push({
+        id: `damping-${axle}`,
+        area: `${cap(axle)} damping`,
+        confidence: "low",
+        kind: "fix",
+        recommendation:
+          cur != null
+            ? `${cap(axle)} rebound ${cur} → ~${r0(cur + 2)}`
+            : `Raise ${axle} rebound a little (and a touch of bump)`,
+        why: `The ${axle} suspension changes direction ~${rate.toFixed(1)}×/s — a sign it may be under-damped (bouncing rather than settling). Rough surfaces inflate this, so it's low-confidence.`,
+        outcome:
+          "Settles the platform faster for steadier grip. Trade-off: too much damping feels harsh and skips over bumps.",
+        viz: { kind: "bar", value: clamp(rate / 6, 0, 1), tone: "warn" },
+      });
+    };
+    dampCard("front", s.frontReversalRate, "frontRebound");
+    dampCard("rear", s.rearReversalRate, "rearRebound");
   }
 
   // ---- Alignment: camber from body roll (medium); toe/caster tip (low) -----

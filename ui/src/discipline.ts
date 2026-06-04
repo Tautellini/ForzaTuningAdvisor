@@ -21,6 +21,7 @@ export interface DisciplineProfile {
     aero: boolean; // downforce level + front/rear balance
     opportunity: boolean; // surface headroom-based opportunities (bias-driven)
     alignment: boolean; // camber (roll-based) + toe/caster tip
+    damping: boolean; // low-confidence damping from oscillation
   };
   thr: {
     wheelspin: number; // frac of on-power frames before flagging
@@ -49,6 +50,7 @@ const BASE_RULES: DisciplineProfile["rules"] = {
   aero: true,
   opportunity: true,
   alignment: true,
+  damping: true,
 };
 
 export const DISCIPLINES: DisciplineProfile[] = [
@@ -156,6 +158,7 @@ export const DISCIPLINES: DisciplineProfile[] = [
       aero: false,
       opportunity: false,
       alignment: false,
+      damping: false,
     },
     thr: {
       wheelspin: 0.12, // launch sensitivity

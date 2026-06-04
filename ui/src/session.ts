@@ -45,6 +45,13 @@ export interface SessionData {
   frontRollSum: number; // sum of |FL-FR| suspension travel (m) under load
   rearRollSum: number;
   maxRoll: number; // peak chassis roll (rad) under load
+  // damping: suspension-travel direction reversals (oscillation)
+  frontRev: number;
+  rearRev: number;
+  lastFront: number;
+  lastRear: number;
+  frontDir: number;
+  rearDir: number;
   bottomFront: number;
   bottomRear: number;
   topFront: number;
@@ -80,6 +87,8 @@ export interface SessionSummary {
   frontRollDeg: number; // estimated front body roll under load
   rearRollDeg: number;
   bodyRollDeg: number; // peak chassis roll
+  frontReversalRate: number; // suspension oscillations / second (damping)
+  rearReversalRate: number;
   brakingFrames: number;
   powerFrames: number;
   maxLatG: number;
@@ -122,6 +131,12 @@ export function emptyData(): SessionData {
     frontRollSum: 0,
     rearRollSum: 0,
     maxRoll: 0,
+    frontRev: 0,
+    rearRev: 0,
+    lastFront: 0,
+    lastRear: 0,
+    frontDir: 0,
+    rearDir: 0,
     bottomFront: 0,
     bottomRear: 0,
     topFront: 0,
@@ -230,6 +245,26 @@ export function addFrame(d: SessionData, f: Telemetry): void {
     d.tempSum[k] += f.tires[k].temp;
     d.tempMax[k] = Math.max(d.tempMax[k], f.tires[k].temp);
   }
+
+  // Damping: count suspension-travel direction reversals (oscillation/bounce).
+  const ft = (f.tires.fl.suspNorm + f.tires.fr.suspNorm) / 2;
+  const rt = (f.tires.rl.suspNorm + f.tires.rr.suspNorm) / 2;
+  if (d.frames > 1) {
+    const fd = ft - d.lastFront;
+    if (Math.abs(fd) > 0.015) {
+      const dir = fd > 0 ? 1 : -1;
+      if (d.frontDir !== 0 && dir !== d.frontDir) d.frontRev++;
+      d.frontDir = dir;
+    }
+    const rd = rt - d.lastRear;
+    if (Math.abs(rd) > 0.015) {
+      const dir = rd > 0 ? 1 : -1;
+      if (d.rearDir !== 0 && dir !== d.rearDir) d.rearRev++;
+      d.rearDir = dir;
+    }
+  }
+  d.lastFront = ft;
+  d.lastRear = rt;
 }
 
 /** Merge several SessionData into one combined bag. */
@@ -268,6 +303,8 @@ export function mergeData(ds: SessionData[]): SessionData {
     out.frontRollSum += d.frontRollSum;
     out.rearRollSum += d.rearRollSum;
     out.maxRoll = Math.max(out.maxRoll, d.maxRoll);
+    out.frontRev += d.frontRev;
+    out.rearRev += d.rearRev;
     out.bottomFront += d.bottomFront;
     out.bottomRear += d.bottomRear;
     out.topFront += d.topFront;
@@ -362,6 +399,14 @@ export function summarize(d: SessionData): SessionSummary | null {
     rearRollDeg:
       d.hardCorner > 0 ? (Math.atan(d.rearRollSum / d.hardCorner / 1.55) * 180) / Math.PI : 0,
     bodyRollDeg: (d.maxRoll * 180) / Math.PI,
+    frontReversalRate: (() => {
+      const s = Math.max(1, (d.lastT - d.firstT) / 1000);
+      return d.frontRev / s;
+    })(),
+    rearReversalRate: (() => {
+      const s = Math.max(1, (d.lastT - d.firstT) / 1000);
+      return d.rearRev / s;
+    })(),
     brakingFrames: d.brakingFrames,
     powerFrames: d.powerFrames,
     maxLatG: d.maxLatG,
