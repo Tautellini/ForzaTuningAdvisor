@@ -2017,3 +2017,14 @@ body {
 .conf-dot.good {
   background: var(--green);
 }
+
+/* ---- advice ok lever row ---- */
+.adv-rec.ok {
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ok-note {
+  color: var(--muted);
+  font-weight: 400;
+}

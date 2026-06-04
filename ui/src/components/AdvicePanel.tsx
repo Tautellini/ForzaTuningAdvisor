@@ -1,53 +1,11 @@
 import { useState } from "react";
-import type { Advice, AdviceGroup, AdviceViz, Confidence } from "../advice/engine";
-import { CONFIDENCE_RANK } from "../advice/engine";
+import type { Advice, AdviceViz, Confidence } from "../advice/engine";
 import type { SessionSummary } from "../session";
-import { TUNE_GROUPS, type CurrentTune } from "../tune";
+import type { CornerKey } from "../types";
+import { TUNE_GROUPS, type CurrentTune, type TuneField } from "../tune";
 import { tempC, type Units } from "../units";
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
-
-/** Current measured state for a group, used when no change is suggested — same
- *  viz kinds as the advice, just shown in a calm "good" appearance. */
-function groupStatus(
-  id: string,
-  s: SessionSummary | null,
-  units: Units,
-): { note: string; viz?: AdviceViz } {
-  if (!s) return { note: "No data yet" };
-  switch (id) {
-    case "tires": {
-      const peak = Math.max(s.tireTempAvg.fl, s.tireTempAvg.fr, s.tireTempAvg.rl, s.tireTempAvg.rr);
-      const tc = tempC(peak, units);
-      return { note: `Temps OK (peak ${Math.round(tc.v)}${tc.unit})`, viz: { kind: "bar", value: clamp((peak - 150) / 110, 0, 1), tone: "good" } };
-    }
-    case "gearing": {
-      const gn = Object.keys(s.gears).map(Number).filter((g) => s.gears[g].k > 0).sort((a, b) => a - b);
-      if (!gn.length) return { note: "Drive to map gearing" };
-      const sf = units.system === "imperial" ? { f: 0.621371, unit: "mph" } : { f: 1, unit: "km/h" };
-      return {
-        note: "Spacing looks fine",
-        viz: { kind: "gears", unit: sf.unit, redline: s.redline, gears: gn.map((g) => ({ g, speed: Math.round(s.gears[g].maxSpeedKmh * sf.f) })) },
-      };
-    }
-    case "alignment":
-      return { note: `Body roll ~${s.frontRollDeg.toFixed(1)}°`, viz: { kind: "bar", value: clamp(s.frontRollDeg / 5, 0, 1), tone: "good" } };
-    case "arb":
-      return { note: "Balanced", viz: { kind: "balance", ratio: s.understeerRatio } };
-    case "springs":
-      return { note: "No bottoming", viz: { kind: "bar", value: Math.max(s.bottoming.front, s.bottoming.rear), tone: "good" } };
-    case "damping":
-      return { note: "Settles OK", viz: { kind: "bar", value: clamp(Math.max(s.frontReversalRate, s.rearReversalRate) / 6, 0, 1), tone: "good" } };
-    case "aero":
-      return { note: "Grip in hand at speed", viz: { kind: "bar", value: s.highSpeedNearLimitFrac, tone: "good" } };
-    case "brakes":
-      return { note: "No lockup", viz: { kind: "bar", value: Math.max(s.frontLockFrac, s.rearLockFrac), tone: "good" } };
-    case "diff":
-      return { note: "Traction OK", viz: { kind: "bar", value: s.wheelspinFrac, tone: "good" } };
-    default:
-      return { note: "No change" };
-  }
-}
 
 const CONF_TEXT: Record<Confidence, string> = {
   high: "high confidence",
@@ -55,32 +13,97 @@ const CONF_TEXT: Record<Confidence, string> = {
   low: "low confidence — treat as a hint",
 };
 
-/** Current tune values for a group, for the "no change" placeholder. */
-function currentValues(
-  groupId: string,
-  tune: CurrentTune,
-  units: Units,
-  drivetrain?: number,
-): string[] {
-  const g = TUNE_GROUPS.find((x) => x.id === groupId);
-  if (!g) return [];
-  if (g.gearing) {
-    const parts: string[] = [];
-    if (tune.finalDrive != null) parts.push(`Final drive ${tune.finalDrive}`);
-    const gr = (tune.gearRatios ?? []).filter((x) => Number.isFinite(x));
-    if (gr.length) parts.push(`${gr.length} gear ratios set`);
-    return parts;
+// Map an advice to the specific lever (tune field) it targets.
+function adviceField(a: Advice): keyof CurrentTune | undefined {
+  if (a.field) return a.field;
+  switch (a.id) {
+    case "balance-understeer":
+    case "balance-oversteer":
+      return "frontARB";
+    case "camber-front":
+      return "frontCamber";
+    case "camber-rear":
+      return "rearCamber";
+    case "brake-front-lock":
+    case "brake-rear-lock":
+      return "brakeBalance";
+    case "diff-front":
+      return "frontDiffAccel";
+    case "diff-rear":
+      return "rearDiffAccel";
+    case "diff-center":
+      return "centerBalance";
+    case "bottoming-front":
+      return "frontRideHeight";
+    case "bottoming-rear":
+      return "rearRideHeight";
+    case "unload-front":
+      return "frontSprings";
+    case "unload-rear":
+      return "rearSprings";
+    case "damping-front":
+      return "frontRebound";
+    case "damping-rear":
+      return "rearRebound";
+    default:
+      return undefined;
   }
-  return g.fields
-    .filter(
-      (f) =>
-        (!f.drivetrains || drivetrain == null || f.drivetrains.includes(drivetrain)) &&
-        tune[f.key] != null,
-    )
-    .map((f) => {
-      const u = f.unit(units);
-      return `${f.label} ${tune[f.key]}${u ? " " + u : ""}`;
-    });
+}
+
+// Current measured state for a lever, shown green when no change is needed.
+function leverStatus(key: keyof CurrentTune, s: SessionSummary | null, units: Units): {
+  note: string;
+  viz?: AdviceViz;
+} {
+  if (!s) return { note: "no data yet" };
+  const tempBar = (a: CornerKey, b: CornerKey) => {
+    const t = (s.tireTempAvg[a] + s.tireTempAvg[b]) / 2;
+    const tc = tempC(t, units);
+    return { note: `temps ok (${Math.round(tc.v)}${tc.unit})`, viz: { kind: "bar" as const, value: clamp((t - 150) / 110, 0, 1), tone: "good" as const } };
+  };
+  switch (key) {
+    case "frontPressure":
+      return tempBar("fl", "fr");
+    case "rearPressure":
+      return tempBar("rl", "rr");
+    case "frontARB":
+    case "rearARB":
+      return { note: "balanced", viz: { kind: "balance", ratio: s.understeerRatio } };
+    case "frontCamber":
+      return { note: `roll ~${s.frontRollDeg.toFixed(1)}°`, viz: { kind: "bar", value: clamp(s.frontRollDeg / 5, 0, 1), tone: "good" } };
+    case "rearCamber":
+      return { note: `roll ~${s.rearRollDeg.toFixed(1)}°`, viz: { kind: "bar", value: clamp(s.rearRollDeg / 5, 0, 1), tone: "good" } };
+    case "frontToe":
+    case "rearToe":
+      return { note: "keep minimal (rear toe-in adds stability)" };
+    case "caster":
+      return { note: "run high for grip & stability" };
+    case "frontSprings":
+    case "frontRideHeight":
+      return { note: "no bottoming", viz: { kind: "bar", value: s.bottoming.front, tone: "good" } };
+    case "rearSprings":
+    case "rearRideHeight":
+      return { note: "no bottoming", viz: { kind: "bar", value: s.bottoming.rear, tone: "good" } };
+    case "frontBump":
+    case "frontRebound":
+      return { note: "settles ok", viz: { kind: "bar", value: clamp(s.frontReversalRate / 6, 0, 1), tone: "good" } };
+    case "rearBump":
+    case "rearRebound":
+      return { note: "settles ok", viz: { kind: "bar", value: clamp(s.rearReversalRate / 6, 0, 1), tone: "good" } };
+    case "frontAero":
+    case "rearAero":
+      return { note: "grip in hand at speed", viz: { kind: "bar", value: s.highSpeedNearLimitFrac, tone: "good" } };
+    case "brakeBalance":
+      return { note: "no lockup", viz: { kind: "bar", value: Math.max(s.frontLockFrac, s.rearLockFrac), tone: "good" } };
+    case "brakePressure":
+      return { note: "no lockup" };
+    case "frontDiffAccel":
+      return { note: "traction ok", viz: { kind: "bar", value: s.frontSpinFrac, tone: "good" } };
+    case "rearDiffAccel":
+      return { note: "traction ok", viz: { kind: "bar", value: s.rearSpinFrac, tone: "good" } };
+    default:
+      return { note: "looks fine" };
+  }
 }
 
 function Viz({ v }: { v: AdviceViz }) {
@@ -171,12 +194,7 @@ function AdviceCard({ a }: { a: Advice }) {
       <div className="adv-head">
         <span className="adv-area">{a.area}</span>
         <span className={`conf-dot ${a.confidence}`} title={CONF_TEXT[a.confidence]} />
-        <button
-          className="adv-info"
-          aria-label="why & outcome"
-          aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
-        >
+        <button className="adv-info" aria-label="why & outcome" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           {open ? "×" : "ⓘ"}
         </button>
       </div>
@@ -196,6 +214,34 @@ function AdviceCard({ a }: { a: Advice }) {
   );
 }
 
+function OkRow({
+  field,
+  summary,
+  tune,
+  units,
+}: {
+  field: TuneField;
+  summary: SessionSummary | null;
+  tune: CurrentTune;
+  units: Units;
+}) {
+  const st = leverStatus(field.key, summary, units);
+  const cur = tune[field.key];
+  const u = field.unit(units);
+  return (
+    <li className="adv adv-ok">
+      <div className="adv-head">
+        <span className="adv-area">{field.label}</span>
+        <span className="conf-dot good" title="no change needed" />
+      </div>
+      <div className="adv-rec ok">
+        {cur != null ? `${cur}${u ? " " + u : ""}` : "—"} <span className="ok-note">· {st.note}</span>
+      </div>
+      {st.viz && <Viz v={st.viz} />}
+    </li>
+  );
+}
+
 interface PanelProps {
   advice: Advice[];
   enoughData: boolean;
@@ -206,23 +252,13 @@ interface PanelProps {
 }
 
 export function AdvicePanel({ advice, enoughData, summary, tune, units, drivetrain }: PanelProps) {
-  const byGroup = new Map<AdviceGroup, Advice[]>();
-  for (const a of advice) {
-    const g = a.group ?? "general";
-    const arr = byGroup.get(g) ?? [];
-    arr.push(a);
-    byGroup.set(g, arr);
-  }
-  for (const arr of byGroup.values())
-    arr.sort((x, y) => CONFIDENCE_RANK[x.confidence] - CONFIDENCE_RANK[y.confidence]);
-
-  const general = byGroup.get("general") ?? [];
+  const general = advice.filter((a) => (a.group ?? "general") === "general");
 
   return (
     <section className="advice">
       <div className="advice-titlebar">
         <h2>Tuning advice</h2>
-        <span className="advice-sub">every tune area · ⓘ for why & trade-off</span>
+        <span className="advice-sub">every lever · amber = change · green = fine · ⓘ for why</span>
       </div>
 
       {!enoughData && (
@@ -234,35 +270,50 @@ export function AdvicePanel({ advice, enoughData, summary, tune, units, drivetra
 
       <div className="advice-groups">
         {TUNE_GROUPS.map((g) => {
-          const items = byGroup.get(g.id as AdviceGroup) ?? [];
-          const current = currentValues(g.id, tune, units, drivetrain);
+          const groupAdvice = advice.filter((a) => a.group === g.id);
+          const leverFields = g.gearing
+            ? []
+            : g.fields.filter((f) => !f.drivetrains || drivetrain == null || f.drivetrains.includes(drivetrain));
+          const leverKeys = new Set<string>(leverFields.map((f) => f.key));
+          const byField = new Map<string, Advice>();
+          const groupCards: Advice[] = [];
+          for (const a of groupAdvice) {
+            const fk = adviceField(a);
+            if (fk && leverKeys.has(fk)) byField.set(fk, a);
+            else groupCards.push(a);
+          }
+
           return (
             <div key={g.id} className="advgroup">
               <div className="advgroup-head">
                 <span className="advgroup-icon">{g.icon}</span>
                 <span className="advgroup-title">{g.title}</span>
               </div>
-              {items.length > 0 ? (
-                <ul className="advgroup-list">
-                  {items.map((a) => (
-                    <AdviceCard key={a.id} a={a} />
-                  ))}
-                </ul>
-              ) : (
-                (() => {
-                  const st = groupStatus(g.id, summary, units);
-                  return (
-                    <div className="adv adv-ok">
-                      <div className="adv-head">
-                        <span className="adv-area">{st.note}</span>
-                        <span className="conf-dot good" title="no change needed" />
-                      </div>
-                      {current.length > 0 && <div className="adv-none-cur">{current.join(" · ")}</div>}
-                      {st.viz && <Viz v={st.viz} />}
-                    </div>
+              <ul className="advgroup-list">
+                {groupCards.map((a) => (
+                  <AdviceCard key={a.id} a={a} />
+                ))}
+                {leverFields.map((f) => {
+                  const a = byField.get(f.key);
+                  return a ? (
+                    <AdviceCard key={f.key} a={a} />
+                  ) : (
+                    <OkRow key={f.key} field={f} summary={summary} tune={tune} units={units} />
                   );
-                })()
-              )}
+                })}
+                {g.gearing && groupCards.length === 0 && summary && (
+                  <li className="adv adv-ok">
+                    <div className="adv-head">
+                      <span className="adv-area">Gearing</span>
+                      <span className="conf-dot good" title="no change needed" />
+                    </div>
+                    <div className="adv-rec ok">
+                      <span className="ok-note">spacing looks fine</span>
+                    </div>
+                  </li>
+                )}
+              </ul>
+              {g.note && <div className="tg-note">{g.note}</div>}
             </div>
           );
         })}

@@ -45,6 +45,7 @@ export interface Advice {
   confidence: Confidence;
   kind: AdviceKind;
   group?: AdviceGroup; // assigned from id at return time
+  field?: keyof CurrentTune; // the specific lever this targets (for ambiguous ids)
   recommendation: string; // the action (includes concrete numbers when available)
   why: string; // evidence from the session data
   outcome: string; // expected result + trade-off
@@ -219,6 +220,7 @@ export function analyzeSession(
         area: "Launch traction",
         confidence: "high",
         kind: "fix",
+        field: key,
         recommendation: `${rec}; drop tire pressure slightly for a bigger contact patch`,
         why: `The ${axle} wheels spin in ${pct(frac)} of on-power frames — that's wasted grip off the line.`,
         outcome:
@@ -488,17 +490,6 @@ export function analyzeSession(
     };
     camberCard("front", s.frontRollDeg, "frontCamber");
     camberCard("rear", s.rearRollDeg, "rearCamber");
-
-    out.push({
-      id: "align-toe-caster",
-      area: "Toe & caster",
-      confidence: "low",
-      kind: "opportunity",
-      recommendation: "Minimal front toe; a little rear toe-in for stability; run high caster.",
-      why: "These aren't measurable from the feed. Excess front toe scrubs the tires (heat + drag); rear toe-in steadies the car; more caster adds cornering camber and straight-line stability.",
-      outcome:
-        "Guidance only — adjust by feel. Less front toe = sharper but hotter-running; more rear toe-in = more stable.",
-    });
   }
 
   // ---- Drift: maximize controllable oversteer ------------------------------
@@ -581,6 +572,7 @@ export function analyzeSession(
         area: "Tires (temperature)",
         confidence: "low",
         kind: "fix",
+        field: frontHot ? "frontPressure" : "rearPressure",
         recommendation: rec,
         why: `${hot.map((k) => { const tc = tempC(s.tireTempAvg[k], u); return `${k.toUpperCase()} avg ${r0(tc.v)}${tc.unit}`; }).join(", ")} — those tires run hottest, so they're working hardest.`,
         outcome:
