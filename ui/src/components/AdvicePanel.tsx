@@ -175,6 +175,23 @@ function Viz({ v }: { v: AdviceViz }) {
       </div>
     );
   }
+  if (v.kind === "ratioset") {
+    return (
+      <div className="chg ratioset">
+        {v.rows.map((r) => {
+          const changed = Math.abs(r.to - r.from) / r.from >= 0.02;
+          return (
+            <div className="rs-row" key={r.g}>
+              <span className="rs-g">{r.g}</span>
+              <span className="rs-from">{r.from.toFixed(2)}</span>
+              <span className={`rs-arrow ${changed ? "on" : ""}`}>→</span>
+              <span className={`rs-to ${changed ? "on" : ""}`}>{r.to.toFixed(2)}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div className={`chg viz-dir dir-${v.dir}`}>
       <span className="vd-arrow">{v.dir === "more" ? "▲" : "▼"}</span>

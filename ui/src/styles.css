@@ -2221,3 +2221,43 @@ body {
 .stickybar-sessions .sessionstrip {
   height: 100%;
 }
+
+/* ---- ratio-set viz (gear spacing) ---- */
+.ratioset {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.rs-g {
+  width: 14px;
+  color: var(--muted);
+  font-weight: 700;
+  text-align: center;
+}
+.rs-from {
+  color: var(--muted);
+  width: 40px;
+  text-align: right;
+}
+.rs-arrow {
+  color: var(--line);
+}
+.rs-arrow.on {
+  color: var(--accent);
+}
+.rs-to {
+  width: 40px;
+  text-align: right;
+  color: var(--muted);
+}
+.rs-to.on {
+  color: var(--accent);
+  font-weight: 700;
+}

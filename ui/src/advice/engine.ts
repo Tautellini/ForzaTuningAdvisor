@@ -37,7 +37,8 @@ export type AdviceViz =
   | { kind: "bar"; value: number; tone: "spin" | "lock" | "warn" | "good" } // 0..1
   | { kind: "delta"; from: number | null; to: number; min: number; max: number; unit?: string }
   | { kind: "dir"; dir: "more" | "less"; label: string }
-  | { kind: "gears"; unit: string; redline: number; gears: { g: number; speed: number; shift?: number }[] };
+  | { kind: "gears"; unit: string; redline: number; gears: { g: number; speed: number; shift?: number }[] }
+  | { kind: "ratioset"; rows: { g: number; from: number; to: number }[] };
 
 export interface Advice {
   id: string;
@@ -202,60 +203,59 @@ export function analyzeSession(
     });
   }
 
-  // ---- Gearing: flag gears you bog out of (land below the torque band) ------
-  if (p.rules.shiftPoints && gearing.shifts.length > 0) {
+  // ---- Gearing: even out spacing (holistic, keeps 1st & top gear) ----------
+  if (p.rules.shiftPoints) {
     const ratios = tune.gearRatios ?? [];
-    // Floor = peak torque: drop below this after a shift and you're genuinely bogging.
-    const floor = gearing.peakTorqueRpm > 0 ? gearing.peakTorqueRpm : Math.round(gearing.peakPowerRpm * 0.7);
-    const target = floor * 1.05; // aim to land just above the torque peak
+    const N = tune.numGears ?? ratios.length;
+    const full = N >= 3 && Array.from({ length: N }, (_, i) => ratios[i]).every((r) => Number.isFinite(r) && (r as number) > 0);
 
-    const cand = gearing.shifts
-      .map((sft) => {
-        const rFrom = ratios[sft.from - 1];
-        const rTo = ratios[sft.to - 1];
-        const exact = Number.isFinite(rFrom) && Number.isFinite(rTo) && (rFrom as number) > 0;
-        const drop = exact
-          ? (rTo as number) / (rFrom as number)
-          : (s.gears[sft.to]?.k ?? 0) / (s.gears[sft.from]?.k ?? 0);
-        if (!Number.isFinite(drop) || drop <= 0 || drop >= 1) return null;
-        const landing = sft.rpm * drop;
-        return { sft, landing, exact, rFrom, rTo };
-      })
-      .filter((x): x is NonNullable<typeof x> => !!x && x.landing < floor) // only genuine bog
-      .sort((a, b) => a.landing - b.landing)
-      .slice(0, 2);
-
-    for (const c of cand) {
-      const g = c.sft.to;
-      const rTo = c.rTo as number;
-      const rFrom = c.rFrom as number;
-      let rec: string;
-      let viz: AdviceViz;
-      if (c.exact) {
-        // ratio that lands you at `target`, clamped strictly between neighbouring gears
-        const rNext = ratios[g]; // gear g+1 (taller -> smaller number)
-        const upper = rFrom - 0.05; // must stay shorter than the gear below
-        const lower = Number.isFinite(rNext) ? (rNext as number) + 0.05 : rTo * 1.02;
-        const want = rFrom * (target / c.sft.rpm);
-        const newR = clamp(want, lower, upper);
-        if (newR <= rTo + 0.02) continue; // can't meaningfully shorten without crossing a neighbour
-        rec = `${g}${ord(g)} gear ${r2(rTo)} → ~${r2(newR)}`;
-        viz = { kind: "delta", from: rTo, to: Math.round(newR * 100) / 100, min: lower, max: upper, unit: "ratio" };
-      } else {
-        const pctChange = clamp(r0((target / c.landing - 1) * 100), 3, 15);
-        rec = `Shorten ${g}${ord(g)} gear ~${pctChange}% (enter your ratios for an exact target)`;
-        viz = { kind: "dir", dir: "more", label: "shorter gear" };
+    if (full) {
+      const r1 = ratios[0] as number;
+      const rN = ratios[N - 1] as number;
+      if (r1 > rN) {
+        // geometric progression between the (unchanged) 1st and top gears
+        const suggested = Array.from({ length: N }, (_, i) => r1 * Math.pow(rN / r1, i / (N - 1)));
+        const rows = suggested.map((sv, i) => ({
+          g: i + 1,
+          from: Math.round((ratios[i] as number) * 100) / 100,
+          to: Math.round(sv * 100) / 100,
+        }));
+        const middleOff = rows.slice(1, N - 1).map((row) => Math.abs(row.to - row.from) / row.from);
+        if (middleOff.length && Math.max(...middleOff) >= 0.04) {
+          out.push({
+            id: "gearing-spacing",
+            area: "Gearing — ratio spacing",
+            confidence: "medium",
+            kind: "fix",
+            recommendation: "Even out the middle gears (keeps your 1st & top gear)",
+            why: "Your middle gears are unevenly spaced, so some shifts drop the revs much more than others. A smooth (geometric) progression keeps each shift's RPM drop consistent — no single gear that bogs or over-revs.",
+            outcome: "Consistent pull out of every gear. Trade-off: none — launch (1st) and top speed (top gear) are unchanged.",
+            viz: { kind: "ratioset", rows },
+          });
+        }
       }
-      out.push({
-        id: `gearing-ratio-${g}`,
-        area: `Gearing — ${g}${ord(g)} gear`,
-        confidence: "medium",
-        kind: "fix",
-        recommendation: rec,
-        why: `After upshifting ${c.sft.from}→${g} you fall to ~${r0(c.landing)} rpm — below peak torque (${r0(gearing.peakTorqueRpm)} rpm), so the engine bogs out of the shift. Closing the gap keeps it pulling.`,
-        outcome: "Stronger acceleration out of that shift (no bogging). Trade-off: you'll shift a touch more often.",
-        viz,
-      });
+    } else if (gearing.shifts.length > 0) {
+      // No full ratio set entered — directional bog flag only.
+      const floor = gearing.peakTorqueRpm > 0 ? gearing.peakTorqueRpm : Math.round(gearing.peakPowerRpm * 0.7);
+      const worst = gearing.shifts
+        .map((sft) => {
+          const drop = (s.gears[sft.to]?.k ?? 0) / (s.gears[sft.from]?.k ?? 0);
+          return Number.isFinite(drop) && drop > 0 && drop < 1 ? { sft, landing: sft.rpm * drop } : null;
+        })
+        .filter((x): x is NonNullable<typeof x> => !!x && x.landing < floor)
+        .sort((a, b) => a.landing - b.landing)[0];
+      if (worst) {
+        out.push({
+          id: `gearing-ratio-${worst.sft.to}`,
+          area: `Gearing — ${worst.sft.to}${ord(worst.sft.to)} gear`,
+          confidence: "medium",
+          kind: "fix",
+          recommendation: `Shorten ${worst.sft.to}${ord(worst.sft.to)} gear a little (enter your ratios for an exact, balanced set)`,
+          why: `After upshifting ${worst.sft.from}→${worst.sft.to} you fall to ~${r0(worst.landing)} rpm — below peak torque (${r0(gearing.peakTorqueRpm)} rpm), so the engine bogs out of the shift.`,
+          outcome: "Stronger acceleration out of that shift (no bogging).",
+          viz: { kind: "dir", dir: "more", label: "shorter gear" },
+        });
+      }
     }
   }
 
