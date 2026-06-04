@@ -1,0 +1,477 @@
+:root {
+  --bg: #0c0e12;
+  --panel: #15181f;
+  --panel-2: #1c2029;
+  --line: #2a2f3a;
+  --text: #e6e9ef;
+  --muted: #8b93a3;
+  --green: #34d058;
+  --red: #ff4d4d;
+  --amber: #e0b020;
+  --accent: #4da3ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---- connection bar ---- */
+.connbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-mark {
+  background: var(--accent);
+  color: #04101f;
+  font-weight: 800;
+  padding: 3px 7px;
+  border-radius: 6px;
+  letter-spacing: 0.5px;
+}
+.brand-name {
+  font-weight: 600;
+}
+.conn-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.dot-green {
+  background: var(--green);
+}
+.dot-amber {
+  background: var(--amber);
+}
+.dot-red {
+  background: var(--red);
+}
+.pulse {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.conn-url {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+.conn-url .link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: inherit;
+}
+.conn-url input {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-family: inherit;
+}
+.conn-url button[type="submit"] {
+  margin-left: 6px;
+  background: var(--accent);
+  color: #04101f;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+/* ---- layout ---- */
+.layout {
+  flex: 1;
+  overflow: auto;
+  padding: 18px;
+}
+.content {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+  gap: 18px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+@media (max-width: 900px) {
+  .content {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 22px;
+}
+.center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: var(--muted);
+  max-width: 560px;
+  margin: 60px auto;
+  text-align: center;
+}
+.setup {
+  max-width: 620px;
+  margin: 40px auto;
+}
+.setup h2 {
+  margin-top: 0;
+}
+.setup code {
+  background: var(--panel-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.setup ol {
+  line-height: 1.9;
+}
+.muted {
+  color: var(--muted);
+}
+.spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- dashboard ---- */
+.dash {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+}
+.dash-primary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.rpm {
+  flex: 1;
+  min-width: 240px;
+}
+.rpm-bar {
+  height: 16px;
+  background: var(--panel-2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.rpm-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green), var(--amber));
+  transition: width 0.06s linear;
+}
+.rpm-bar.redline .rpm-fill {
+  background: linear-gradient(90deg, var(--amber), var(--red));
+}
+.rpm-val {
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+}
+.unit {
+  color: var(--muted);
+  font-size: 13px;
+}
+.speed-gear {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+.gear {
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+  min-width: 56px;
+  text-align: center;
+}
+.speed {
+  font-size: 40px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.pedals {
+  display: flex;
+  gap: 18px;
+  align-items: flex-end;
+}
+.pedal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.pedal-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.pedal-track {
+  width: 26px;
+  height: 80px;
+  background: var(--panel-2);
+  border-radius: 6px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+.pedal-fill {
+  width: 100%;
+  transition: height 0.06s linear;
+}
+.bar-green {
+  background: var(--green);
+}
+.bar-red {
+  background: var(--red);
+}
+.steer {
+  flex: 1;
+}
+.steer-track {
+  position: relative;
+  width: 100%;
+  height: 26px;
+  background: var(--panel-2);
+  border-radius: 6px;
+}
+.steer-center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.steer-dot {
+  position: absolute;
+  top: 7px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  transition: left 0.06s linear;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.stat {
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 96px;
+}
+.stat-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- tire grid ---- */
+.tiregrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  max-width: 360px;
+}
+.tire {
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 1fr 14px;
+  grid-template-rows: auto auto auto;
+  gap: 6px 10px;
+  align-items: center;
+}
+.tire-label {
+  grid-column: 1;
+  color: var(--muted);
+  font-weight: 600;
+}
+.tire-temp {
+  grid-column: 1;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-weight: 700;
+  color: #06101a;
+  text-align: center;
+}
+.tire-slip {
+  grid-column: 1;
+  height: 6px;
+  background: #0c0e12;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.tire-slip-fill {
+  height: 100%;
+  transition: width 0.1s linear;
+}
+.tire-susp {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  height: 100%;
+  min-height: 60px;
+  background: #0c0e12;
+  border-radius: 4px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+.tire-susp-fill {
+  width: 100%;
+  background: var(--accent);
+  transition: height 0.1s linear;
+}
+
+/* ---- advice ---- */
+.advice {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  align-self: start;
+}
+.advice h2 {
+  margin: 0 0 14px;
+  display: flex;
+  flex-direction: column;
+}
+.advice-sub {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.advice-empty {
+  color: var(--muted);
+  padding: 12px 0;
+}
+.advice-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.advice-item {
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--line);
+}
+.advice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.advice-area {
+  font-weight: 700;
+}
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-high {
+  background: rgba(52, 208, 88, 0.18);
+  color: var(--green);
+}
+.badge-med {
+  background: rgba(224, 176, 32, 0.18);
+  color: var(--amber);
+}
+.badge-low {
+  background: rgba(139, 147, 163, 0.18);
+  color: var(--muted);
+}
+.advice-item:has(.badge-high) {
+  border-left-color: var(--green);
+}
+.advice-item:has(.badge-med) {
+  border-left-color: var(--amber);
+}
+.advice-msg {
+  margin: 0;
+}
+.advice-detail {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.advice-foot {
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}

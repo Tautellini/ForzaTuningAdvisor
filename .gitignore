@@ -19,3 +19,7 @@ node_modules/
 # Environment
 .env
 *.local
+
+# Tooling
+.claude/settings.local.json
+*.tsbuildinfo
