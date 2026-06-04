@@ -1990,3 +1990,17 @@ body {
   font-size: 10px;
   color: var(--amber);
 }
+
+/* ---- advice: "no change" uses same viz, calm appearance ---- */
+.adv-ok {
+  border-color: rgba(52, 208, 88, 0.25);
+}
+.adv-ok .adv-area {
+  color: var(--green);
+}
+.adv-ok .chg {
+  opacity: 0.7;
+}
+.conf-dot.good {
+  background: var(--green);
+}

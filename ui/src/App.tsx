@@ -111,6 +111,7 @@ export default function App() {
               <AdvicePanel
                 advice={advice}
                 enoughData={enoughData}
+                summary={computed}
                 tune={tune}
                 units={units}
                 drivetrain={lastCar?.drivetrain ?? (driving ? latest.car.drivetrain : undefined)}

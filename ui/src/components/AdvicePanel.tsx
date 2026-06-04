@@ -1,10 +1,53 @@
 import { useState } from "react";
 import type { Advice, AdviceGroup, AdviceViz, Confidence } from "../advice/engine";
 import { CONFIDENCE_RANK } from "../advice/engine";
+import type { SessionSummary } from "../session";
 import { TUNE_GROUPS, type CurrentTune } from "../tune";
-import type { Units } from "../units";
+import { tempC, type Units } from "../units";
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
+
+/** Current measured state for a group, used when no change is suggested — same
+ *  viz kinds as the advice, just shown in a calm "good" appearance. */
+function groupStatus(
+  id: string,
+  s: SessionSummary | null,
+  units: Units,
+): { note: string; viz?: AdviceViz } {
+  if (!s) return { note: "No data yet" };
+  switch (id) {
+    case "tires": {
+      const peak = Math.max(s.tireTempAvg.fl, s.tireTempAvg.fr, s.tireTempAvg.rl, s.tireTempAvg.rr);
+      const tc = tempC(peak, units);
+      return { note: `Temps OK (peak ${Math.round(tc.v)}${tc.unit})`, viz: { kind: "bar", value: clamp((peak - 150) / 110, 0, 1), tone: "good" } };
+    }
+    case "gearing": {
+      const gn = Object.keys(s.gears).map(Number).filter((g) => s.gears[g].k > 0).sort((a, b) => a - b);
+      if (!gn.length) return { note: "Drive to map gearing" };
+      const sf = units.system === "imperial" ? { f: 0.621371, unit: "mph" } : { f: 1, unit: "km/h" };
+      return {
+        note: "Spacing looks fine",
+        viz: { kind: "gears", unit: sf.unit, redline: s.redline, gears: gn.map((g) => ({ g, speed: Math.round(s.gears[g].maxSpeedKmh * sf.f) })) },
+      };
+    }
+    case "alignment":
+      return { note: `Body roll ~${s.frontRollDeg.toFixed(1)}°`, viz: { kind: "bar", value: clamp(s.frontRollDeg / 5, 0, 1), tone: "good" } };
+    case "arb":
+      return { note: "Balanced", viz: { kind: "balance", ratio: s.understeerRatio } };
+    case "springs":
+      return { note: "No bottoming", viz: { kind: "bar", value: Math.max(s.bottoming.front, s.bottoming.rear), tone: "good" } };
+    case "damping":
+      return { note: "Settles OK", viz: { kind: "bar", value: clamp(Math.max(s.frontReversalRate, s.rearReversalRate) / 6, 0, 1), tone: "good" } };
+    case "aero":
+      return { note: "Grip in hand at speed", viz: { kind: "bar", value: s.highSpeedNearLimitFrac, tone: "good" } };
+    case "brakes":
+      return { note: "No lockup", viz: { kind: "bar", value: Math.max(s.frontLockFrac, s.rearLockFrac), tone: "good" } };
+    case "diff":
+      return { note: "Traction OK", viz: { kind: "bar", value: s.wheelspinFrac, tone: "good" } };
+    default:
+      return { note: "No change" };
+  }
+}
 
 const CONF_TEXT: Record<Confidence, string> = {
   high: "high confidence",
@@ -155,12 +198,13 @@ function AdviceCard({ a }: { a: Advice }) {
 interface PanelProps {
   advice: Advice[];
   enoughData: boolean;
+  summary: SessionSummary | null;
   tune: CurrentTune;
   units: Units;
   drivetrain?: number;
 }
 
-export function AdvicePanel({ advice, enoughData, tune, units, drivetrain }: PanelProps) {
+export function AdvicePanel({ advice, enoughData, summary, tune, units, drivetrain }: PanelProps) {
   const byGroup = new Map<AdviceGroup, Advice[]>();
   for (const a of advice) {
     const g = a.group ?? "general";
@@ -204,14 +248,19 @@ export function AdvicePanel({ advice, enoughData, tune, units, drivetrain }: Pan
                   ))}
                 </ul>
               ) : (
-                <div className="adv-none">
-                  <span className="adv-none-tag">No change suggested</span>
-                  {current.length > 0 ? (
-                    <span className="adv-none-cur">{current.join(" · ")}</span>
-                  ) : (
-                    <span className="adv-none-cur muted">current values not entered</span>
-                  )}
-                </div>
+                (() => {
+                  const st = groupStatus(g.id, summary, units);
+                  return (
+                    <div className="adv adv-ok">
+                      <div className="adv-head">
+                        <span className="adv-area">{st.note}</span>
+                        <span className="conf-dot good" title="no change needed" />
+                      </div>
+                      {current.length > 0 && <div className="adv-none-cur">{current.join(" · ")}</div>}
+                      {st.viz && <Viz v={st.viz} />}
+                    </div>
+                  );
+                })()
               )}
             </div>
           );
