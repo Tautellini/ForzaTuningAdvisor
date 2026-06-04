@@ -46,7 +46,6 @@ function NumberField({
         <input
           type="text"
           inputMode="decimal"
-          placeholder="—"
           value={text}
           onChange={(e) => {
             setText(e.target.value);

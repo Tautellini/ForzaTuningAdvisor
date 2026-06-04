@@ -115,7 +115,7 @@ export function LivePanel({ t, units }: { t: Telemetry; units: Units }) {
                     height="58"
                     rx="9"
                     fill="none"
-                    stroke={spinning ? "#ff4d4d" : "#4da3ff"}
+                    style={{ stroke: spinning ? "var(--red)" : "var(--secondary)" }}
                     strokeWidth={ringW}
                     opacity="0.9"
                   />

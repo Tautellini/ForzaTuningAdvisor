@@ -95,7 +95,7 @@ export function CarStrip({ t, units, driving }: { t: Telemetry; units: Units; dr
                   height="50"
                   rx="8"
                   fill="none"
-                  stroke={spinning ? "#ff4d4d" : "#4da3ff"}
+                  style={{ stroke: spinning ? "var(--red)" : "var(--secondary)" }}
                   strokeWidth={ringW}
                   opacity="0.9"
                 />
