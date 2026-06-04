@@ -108,7 +108,13 @@ export default function App() {
             <Coverage summary={computed} />
             <div className="advice-wrap">
               <PriorityBar priorities={priorities} onChange={changePriorities} />
-              <AdvicePanel advice={advice} enoughData={enoughData} />
+              <AdvicePanel
+                advice={advice}
+                enoughData={enoughData}
+                tune={tune}
+                units={units}
+                drivetrain={lastCar?.drivetrain ?? (driving ? latest.car.drivetrain : undefined)}
+              />
             </div>
           </div>
         )}

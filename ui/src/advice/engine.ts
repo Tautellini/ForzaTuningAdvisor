@@ -20,6 +20,8 @@ export type AdviceGroup =
 
 function groupForId(id: string): AdviceGroup {
   if (id.startsWith("gearing")) return "gearing";
+  if (id.startsWith("camber") || id.startsWith("align") || id.startsWith("toe") || id.startsWith("caster"))
+    return "alignment";
   if (id === "drag-aero" || id.startsWith("aero")) return "aero";
   if (id.startsWith("brake")) return "brakes";
   if (id.startsWith("diff") || id.startsWith("drift") || id === "drag-launch") return "diff";
@@ -48,6 +50,7 @@ export interface Advice {
 }
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
+const cap = (x: string) => x[0].toUpperCase() + x.slice(1);
 const r0 = (x: number) => Math.round(x);
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -417,6 +420,46 @@ export function analyzeSession(
         viz: { kind: "dir", dir: "less", label: "downforce" },
       });
     }
+  }
+
+  // ---- Alignment: camber from body roll (medium); toe/caster tip (low) -----
+  if (p.rules.alignment && s.hardCornerFrames >= 30) {
+    const camberCard = (
+      axle: "front" | "rear",
+      rollDeg: number,
+      key: "frontCamber" | "rearCamber",
+    ) => {
+      if (rollDeg < 0.6) return; // negligible roll — camber barely matters
+      const target = -clamp(Math.round(rollDeg * 0.75 * 10) / 10, 0.3, 4.0);
+      const cur = tune[key];
+      out.push({
+        id: `camber-${axle}`,
+        area: `${cap(axle)} camber`,
+        confidence: "medium",
+        kind: "fix",
+        recommendation:
+          cur != null
+            ? `${cap(axle)} camber ${cur}° → ~${target.toFixed(1)}°`
+            : `Run about ${target.toFixed(1)}° ${axle} camber`,
+        why: `Body roll at the ${axle} is ≈ ${rollDeg.toFixed(1)}° under cornering load — set static camber so the loaded (outside) tire sits flat at full lean.`,
+        outcome:
+          "More grip from the outside tire mid-corner. Trade-off: too much hurts straight-line braking/traction. A starting point — refine as you iterate.",
+        viz: { kind: "delta", from: cur ?? null, to: target, min: -5, max: 0, unit: "°" },
+      });
+    };
+    camberCard("front", s.frontRollDeg, "frontCamber");
+    camberCard("rear", s.rearRollDeg, "rearCamber");
+
+    out.push({
+      id: "align-toe-caster",
+      area: "Toe & caster",
+      confidence: "low",
+      kind: "opportunity",
+      recommendation: "Minimal front toe; a little rear toe-in for stability; run high caster.",
+      why: "These aren't measurable from the feed. Excess front toe scrubs the tires (heat + drag); rear toe-in steadies the car; more caster adds cornering camber and straight-line stability.",
+      outcome:
+        "Guidance only — adjust by feel. Less front toe = sharper but hotter-running; more rear toe-in = more stable.",
+    });
   }
 
   // ---- Drift: maximize controllable oversteer ------------------------------

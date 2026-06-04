@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { Advice, AdviceGroup, AdviceViz, Confidence } from "../advice/engine";
 import { CONFIDENCE_RANK } from "../advice/engine";
-import { TUNE_GROUPS } from "../tune";
+import { TUNE_GROUPS, type CurrentTune } from "../tune";
+import type { Units } from "../units";
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 
@@ -11,11 +12,33 @@ const CONF_TEXT: Record<Confidence, string> = {
   low: "low confidence — treat as a hint",
 };
 
-const GROUP_META: Record<string, { title: string; icon: string }> = {
-  ...Object.fromEntries(TUNE_GROUPS.map((g) => [g.id, { title: g.title, icon: g.icon }])),
-  general: { title: "General", icon: "✨" },
-};
-const GROUP_ORDER: AdviceGroup[] = [...TUNE_GROUPS.map((g) => g.id as AdviceGroup), "general"];
+/** Current tune values for a group, for the "no change" placeholder. */
+function currentValues(
+  groupId: string,
+  tune: CurrentTune,
+  units: Units,
+  drivetrain?: number,
+): string[] {
+  const g = TUNE_GROUPS.find((x) => x.id === groupId);
+  if (!g) return [];
+  if (g.gearing) {
+    const parts: string[] = [];
+    if (tune.finalDrive != null) parts.push(`Final drive ${tune.finalDrive}`);
+    const gr = (tune.gearRatios ?? []).filter((x) => Number.isFinite(x));
+    if (gr.length) parts.push(`${gr.length} gear ratios set`);
+    return parts;
+  }
+  return g.fields
+    .filter(
+      (f) =>
+        (!f.drivetrains || drivetrain == null || f.drivetrains.includes(drivetrain)) &&
+        tune[f.key] != null,
+    )
+    .map((f) => {
+      const u = f.unit(units);
+      return `${f.label} ${tune[f.key]}${u ? " " + u : ""}`;
+    });
+}
 
 function Viz({ v }: { v: AdviceViz }) {
   if (v.kind === "delta") {
@@ -110,7 +133,15 @@ function AdviceCard({ a }: { a: Advice }) {
   );
 }
 
-export function AdvicePanel({ advice, enoughData }: { advice: Advice[]; enoughData: boolean }) {
+interface PanelProps {
+  advice: Advice[];
+  enoughData: boolean;
+  tune: CurrentTune;
+  units: Units;
+  drivetrain?: number;
+}
+
+export function AdvicePanel({ advice, enoughData, tune, units, drivetrain }: PanelProps) {
   const byGroup = new Map<AdviceGroup, Advice[]>();
   for (const a of advice) {
     const g = a.group ?? "general";
@@ -121,49 +152,70 @@ export function AdvicePanel({ advice, enoughData }: { advice: Advice[]; enoughDa
   for (const arr of byGroup.values())
     arr.sort((x, y) => CONFIDENCE_RANK[x.confidence] - CONFIDENCE_RANK[y.confidence]);
 
+  const general = byGroup.get("general") ?? [];
+
   return (
     <section className="advice">
       <div className="advice-titlebar">
         <h2>Tuning advice</h2>
-        <span className="advice-sub">grouped by tune area · ⓘ for why & trade-off</span>
+        <span className="advice-sub">every tune area · ⓘ for why & trade-off</span>
       </div>
 
-      {!enoughData ? (
+      {!enoughData && (
         <div className="advice-empty">
-          Keep driving — push through corners, braking zones, and full-throttle pulls. Advice builds
-          up as the session gathers data (see Data coverage below).
+          Advice firms up as you gather data (see Data coverage below) — keep driving through corners,
+          braking zones, and full-throttle pulls.
         </div>
-      ) : advice.length === 0 ? (
-        <div className="advice-empty">
-          Nothing to flag — the car looks balanced for how you've driven. Drive harder or adjust your
-          priorities to surface opportunities.
-        </div>
-      ) : (
-        <div className="advice-groups">
-          {GROUP_ORDER.map((gid) => {
-            const items = byGroup.get(gid);
-            if (!items || items.length === 0) return null;
-            const meta = GROUP_META[gid];
-            return (
-              <div key={gid} className="advgroup">
-                <div className="advgroup-head">
-                  <span className="advgroup-icon">{meta.icon}</span>
-                  <span className="advgroup-title">{meta.title}</span>
-                </div>
+      )}
+
+      <div className="advice-groups">
+        {TUNE_GROUPS.map((g) => {
+          const items = byGroup.get(g.id as AdviceGroup) ?? [];
+          const current = currentValues(g.id, tune, units, drivetrain);
+          return (
+            <div key={g.id} className="advgroup">
+              <div className="advgroup-head">
+                <span className="advgroup-icon">{g.icon}</span>
+                <span className="advgroup-title">{g.title}</span>
+              </div>
+              {items.length > 0 ? (
                 <ul className="advgroup-list">
                   {items.map((a) => (
                     <AdviceCard key={a.id} a={a} />
                   ))}
                 </ul>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              ) : (
+                <div className="adv-none">
+                  <span className="adv-none-tag">No change suggested</span>
+                  {current.length > 0 ? (
+                    <span className="adv-none-cur">{current.join(" · ")}</span>
+                  ) : (
+                    <span className="adv-none-cur muted">current values not entered</span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {general.length > 0 && (
+          <div className="advgroup">
+            <div className="advgroup-head">
+              <span className="advgroup-icon">✨</span>
+              <span className="advgroup-title">General</span>
+            </div>
+            <ul className="advgroup-list">
+              {general.map((a) => (
+                <AdviceCard key={a.id} a={a} />
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
 
       <p className="advice-foot">
-        Numbers come from your data; enter your current tune above for exact targets. Alignment isn't
-        shown — the feed can't measure it.
+        Numbers come from your data; enter your current tune above for exact targets. Camber is
+        roll-estimated; toe/caster are guidance only.
       </p>
     </section>
   );

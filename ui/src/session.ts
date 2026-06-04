@@ -41,6 +41,10 @@ export interface SessionData {
   hsNearLimit: number;
   hsFrontSA: number;
   hsRearSA: number;
+  hardCorner: number; // cornering frames under real lateral load
+  frontRollSum: number; // sum of |FL-FR| suspension travel (m) under load
+  rearRollSum: number;
+  maxRoll: number; // peak chassis roll (rad) under load
   bottomFront: number;
   bottomRear: number;
   topFront: number;
@@ -72,6 +76,10 @@ export interface SessionSummary {
   avgFrontSlipAngle: number;
   avgRearSlipAngle: number;
   corneringFrames: number;
+  hardCornerFrames: number;
+  frontRollDeg: number; // estimated front body roll under load
+  rearRollDeg: number;
+  bodyRollDeg: number; // peak chassis roll
   brakingFrames: number;
   powerFrames: number;
   maxLatG: number;
@@ -110,6 +118,10 @@ export function emptyData(): SessionData {
     hsNearLimit: 0,
     hsFrontSA: 0,
     hsRearSA: 0,
+    hardCorner: 0,
+    frontRollSum: 0,
+    rearRollSum: 0,
+    maxRoll: 0,
     bottomFront: 0,
     bottomRear: 0,
     topFront: 0,
@@ -200,6 +212,13 @@ export function addFrame(d: SessionData, f: Telemetry): void {
       d.hsFrontSA += frontSA;
       d.hsRearSA += rearSA;
     }
+    // Body roll for camber estimation — only under real lateral load.
+    if (Math.abs(f.accel.x) / 9.81 >= 0.5) {
+      d.hardCorner++;
+      d.frontRollSum += Math.abs(f.tires.fl.suspM - f.tires.fr.suspM);
+      d.rearRollSum += Math.abs(f.tires.rl.suspM - f.tires.rr.suspM);
+      d.maxRoll = Math.max(d.maxRoll, Math.abs(f.roll));
+    }
   }
 
   if (f.tires.fl.suspNorm >= 0.97 || f.tires.fr.suspNorm >= 0.97) d.bottomFront++;
@@ -245,6 +264,10 @@ export function mergeData(ds: SessionData[]): SessionData {
     out.hsNearLimit += d.hsNearLimit;
     out.hsFrontSA += d.hsFrontSA;
     out.hsRearSA += d.hsRearSA;
+    out.hardCorner += d.hardCorner;
+    out.frontRollSum += d.frontRollSum;
+    out.rearRollSum += d.rearRollSum;
+    out.maxRoll = Math.max(out.maxRoll, d.maxRoll);
     out.bottomFront += d.bottomFront;
     out.bottomRear += d.bottomRear;
     out.topFront += d.topFront;
@@ -333,6 +356,12 @@ export function summarize(d: SessionData): SessionSummary | null {
     avgFrontSlipAngle: d.corneringFrames > 0 ? d.frontSASum / d.corneringFrames : 0,
     avgRearSlipAngle: d.corneringFrames > 0 ? d.rearSASum / d.corneringFrames : 0,
     corneringFrames: d.corneringFrames,
+    hardCornerFrames: d.hardCorner,
+    frontRollDeg:
+      d.hardCorner > 0 ? (Math.atan(d.frontRollSum / d.hardCorner / 1.55) * 180) / Math.PI : 0,
+    rearRollDeg:
+      d.hardCorner > 0 ? (Math.atan(d.rearRollSum / d.hardCorner / 1.55) * 180) / Math.PI : 0,
+    bodyRollDeg: (d.maxRoll * 180) / Math.PI,
     brakingFrames: d.brakingFrames,
     powerFrames: d.powerFrames,
     maxLatG: d.maxLatG,

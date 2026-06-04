@@ -81,7 +81,7 @@ export const TUNE_GROUPS: TuneGroup[] = [
     id: "alignment",
     title: "Alignment",
     icon: "📐",
-    note: "Not derivable from the feed (only one temp per tire) — kept for your reference.",
+    note: "Camber is estimated from body roll (a starting point); toe/caster are guidance only.",
     fields: [
       { key: "frontCamber", label: "Front camber", unit: deg },
       { key: "rearCamber", label: "Rear camber", unit: deg },
