@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { CurrentTune } from "../tune";
 import { TUNE_GROUPS, saveTune } from "../tune";
 import type { Units } from "../units";
+import { InfoDot } from "./InfoDot";
 
 interface Props {
   tune: CurrentTune;
@@ -95,9 +96,8 @@ export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
     <section className="tunepanel2">
       <button className="tunepanel2-head" onClick={() => setOpen((o) => !o)}>
         <span className="tunestrip-title">Current tune</span>
-        <span className="tunestrip-sub">
-          {setCount > 0 ? `${setCount} set · ` : ""}applies to every session — enter it for target numbers
-        </span>
+        {setCount > 0 && <span className="tune-count">{setCount}</span>}
+        <InfoDot text="Your car's current settings. Applies to every session. Enter values to get exact target numbers in the advice (comma or dot ok)." />
         <span className="chev">{open ? "▾" : "▸"}</span>
       </button>
 
@@ -154,6 +154,7 @@ export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
                 <div className="tunegroup-head">
                   <span className="tg-icon">{g.icon}</span>
                   <span className="tg-title">{g.title}</span>
+                  {g.note && <InfoDot text={g.note} />}
                 </div>
                 <div className="tunegroup-fields">
                   {fields.map((f) => (
@@ -166,7 +167,6 @@ export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
                     />
                   ))}
                 </div>
-                {g.note && <div className="tg-note">{g.note}</div>}
               </div>
             );
           })}

@@ -4,6 +4,7 @@ import type { SessionSummary } from "../session";
 import type { CornerKey } from "../types";
 import { TUNE_GROUPS, type CurrentTune, type TuneField } from "../tune";
 import { tempC, type Units } from "../units";
+import { InfoDot } from "./InfoDot";
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 
@@ -258,7 +259,7 @@ export function AdvicePanel({ advice, enoughData, summary, tune, units, drivetra
     <section className="advice">
       <div className="advice-titlebar">
         <h2>Tuning advice</h2>
-        <span className="advice-sub">every lever · amber = change · green = fine · ⓘ for why</span>
+        <InfoDot text="Every adjustable lever. Amber = change suggested, green = fine. Click a card's ⓘ for why & trade-off. Numbers come from your data; enter your current tune for exact targets. Camber is roll-estimated; toe/caster are guidance only." />
       </div>
 
       {!enoughData && (
@@ -288,6 +289,7 @@ export function AdvicePanel({ advice, enoughData, summary, tune, units, drivetra
               <div className="advgroup-head">
                 <span className="advgroup-icon">{g.icon}</span>
                 <span className="advgroup-title">{g.title}</span>
+                {g.note && <InfoDot text={g.note} />}
               </div>
               <ul className="advgroup-list">
                 {groupCards.map((a) => (
@@ -313,7 +315,6 @@ export function AdvicePanel({ advice, enoughData, summary, tune, units, drivetra
                   </li>
                 )}
               </ul>
-              {g.note && <div className="tg-note">{g.note}</div>}
             </div>
           );
         })}
@@ -333,10 +334,6 @@ export function AdvicePanel({ advice, enoughData, summary, tune, units, drivetra
         )}
       </div>
 
-      <p className="advice-foot">
-        Numbers come from your data; enter your current tune above for exact targets. Camber is
-        roll-estimated; toe/caster are guidance only.
-      </p>
     </section>
   );
 }

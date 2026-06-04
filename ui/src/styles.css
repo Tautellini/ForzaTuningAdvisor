@@ -2178,3 +2178,35 @@ body {
   width: auto;
   display: block;
 }
+
+/* ---- info dot (hover tooltips, keeps UI text-free) ---- */
+.infodot {
+  color: var(--muted);
+  cursor: help;
+  font-size: 13px;
+  line-height: 1;
+}
+.infodot:hover {
+  color: var(--accent);
+}
+.ss-titlewrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ss-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--panel-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.priority-head {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.advice-titlebar {
+  align-items: center;
+}

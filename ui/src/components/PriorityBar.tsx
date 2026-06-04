@@ -1,4 +1,5 @@
 import { PRIORITY_LABELS, movePriority, type PriorityId } from "../priorities";
+import { InfoDot } from "./InfoDot";
 
 interface Props {
   priorities: PriorityId[];
@@ -10,10 +11,7 @@ export function PriorityBar({ priorities, onChange }: Props) {
     <div className="prioritybar">
       <div className="priority-head">
         <span className="priority-title">Your priorities</span>
-        <span className="priority-sub">
-          rank what matters — advice tilts toward the top, and uses this to spot opportunities when
-          the car's clean
-        </span>
+        <InfoDot text="Rank what matters most. Advice tilts toward the top, and uses this to spot opportunities when the car is already clean." />
       </div>
       <ol className="priority-list">
         {priorities.map((id, i) => (

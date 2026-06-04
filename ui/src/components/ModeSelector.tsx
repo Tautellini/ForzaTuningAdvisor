@@ -1,4 +1,5 @@
 import { DISCIPLINES, type DisciplineId, type DisciplineProfile } from "../discipline";
+import { InfoDot } from "./InfoDot";
 
 interface Props {
   active: DisciplineId;
@@ -21,8 +22,8 @@ export function ModeSelector({ active, onChange, profile }: Props) {
             {d.label}
           </button>
         ))}
+        <InfoDot text={profile.blurb} />
       </div>
-      <p className="mode-blurb">{profile.blurb}</p>
     </div>
   );
 }

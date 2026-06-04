@@ -1,5 +1,6 @@
 import { DRIVETRAIN } from "../types";
 import type { SessionStore } from "../sessions";
+import { InfoDot } from "./InfoDot";
 
 interface Props {
   store: SessionStore;
@@ -34,17 +35,14 @@ export function SessionStrip({
   return (
     <div className="sessionstrip">
       <div className="ss-head">
-        <div>
+        <div className="ss-titlewrap">
           <span className="ss-title">Sessions</span>
-          <span className="ss-sub">
-            {" "}
-            all sessions for your current tune are combined ({effective} active). Untick or delete a
-            bad run. Changed the tune? Clear all and record a fresh set.
-          </span>
+          <span className="ss-count">{effective}</span>
+          <InfoDot text="All sessions for your current tune are combined for the advice. Untick or delete a bad run. Changed the tune? Clear all and record a fresh set." />
         </div>
         {store.sessions.length > 0 && (
-          <button className="link-btn" onClick={onClear}>
-            clear all (new tune)
+          <button className="link-btn" onClick={onClear} title="Clear all sessions (start a fresh tune)">
+            clear all
           </button>
         )}
       </div>
