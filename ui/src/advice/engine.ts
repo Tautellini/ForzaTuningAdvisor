@@ -241,47 +241,53 @@ export function analyzeSession(
     });
   }
 
-  // ---- Brakes: lockup + balance --------------------------------------------
+  // ---- Brakes: balance (with deadband) or overall pressure -----------------
   if (p.rules.brakes && s.brakingFrames >= MIN.braking) {
-    if (s.frontLockFrac >= p.thr.lockup && s.frontLockFrac >= s.rearLockFrac) {
-      const shift = clamp(r0(s.frontLockFrac * 20), 2, 10);
-      const rec =
-        tune.brakeBalance != null
-          ? `Brake balance ${r0(tune.brakeBalance)}% → ~${r0(tune.brakeBalance - shift)}% front`
-          : `Move brake balance ~${shift}% rearward`;
-      out.push({
-        id: "brake-front-lock",
-        area: "Brakes",
-        confidence: "high",
-        kind: "fix",
-        recommendation: rec,
-        why: `Front wheels lock in ${pct(s.frontLockFrac)} of braking — when they lock you can't steer and you flat-spot the tires.`,
-        outcome:
-          "You can brake later and still turn in. Trade-off: shift too far and the rears start to lock instead.",
-        viz:
-          tune.brakeBalance != null
-            ? { kind: "delta", from: tune.brakeBalance, to: clamp(tune.brakeBalance - shift, 0, 100), min: 0, max: 100, unit: "% front" }
-            : { kind: "bar", value: s.frontLockFrac, tone: "lock" },
-      });
-    } else if (s.rearLockFrac >= p.thr.lockup && s.rearLockFrac > s.frontLockFrac) {
-      const shift = clamp(r0(s.rearLockFrac * 20), 2, 10);
-      const rec =
-        tune.brakeBalance != null
-          ? `Brake balance ${r0(tune.brakeBalance)}% → ~${r0(tune.brakeBalance + shift)}% front`
-          : `Move brake balance ~${shift}% forward`;
-      out.push({
-        id: "brake-rear-lock",
-        area: "Brakes",
-        confidence: "high",
-        kind: "fix",
-        recommendation: rec,
-        why: `Rear wheels lock in ${pct(s.rearLockFrac)} of braking — that can step the back end out under braking.`,
-        outcome: "More stable braking. Trade-off: shift too far forward and the fronts start to lock.",
-        viz:
-          tune.brakeBalance != null
-            ? { kind: "delta", from: tune.brakeBalance, to: clamp(tune.brakeBalance + shift, 0, 100), min: 0, max: 100, unit: "% front" }
-            : { kind: "bar", value: s.rearLockFrac, tone: "lock" },
-      });
+    const imbalance = s.frontLockFrac - s.rearLockFrac; // + = front locks more
+    const lockMax = Math.max(s.frontLockFrac, s.rearLockFrac);
+    if (lockMax >= p.thr.lockup) {
+      if (Math.abs(imbalance) >= 0.1) {
+        // clear front/rear bias — shift balance toward the axle that ISN'T locking
+        const front = imbalance > 0;
+        const shift = clamp(r0(Math.abs(imbalance) * 15), 1, 6);
+        const cur = tune.brakeBalance;
+        const to = cur != null ? clamp(cur + (front ? -shift : shift), 0, 100) : null;
+        out.push({
+          id: front ? "brake-front-lock" : "brake-rear-lock",
+          area: "Brake balance",
+          confidence: "high",
+          kind: "fix",
+          recommendation:
+            cur != null
+              ? `Brake balance ${r0(cur)}% → ~${r0(to!)}% front`
+              : `Move brake balance ~${shift}% ${front ? "rearward" : "forward"}`,
+          why: `${front ? "Front" : "Rear"} wheels lock more under braking (${pct(s.frontLockFrac)} F vs ${pct(s.rearLockFrac)} R) — bias the brakes toward the axle that isn't locking. Small step on purpose, to avoid overshooting back the other way.`,
+          outcome: front
+            ? "Keeps the fronts rolling so you can still steer while braking. Trade-off: too far and the rears begin to lock."
+            : "Steadier rear under braking. Trade-off: too far forward and the fronts begin to lock.",
+          viz:
+            cur != null
+              ? { kind: "delta", from: cur, to: to!, min: 0, max: 100, unit: "% front" }
+              : { kind: "bar", value: front ? s.frontLockFrac : s.rearLockFrac, tone: "lock" },
+        });
+      } else {
+        // both axles lock about equally — that's overall pressure, not balance
+        const cur = tune.brakePressure;
+        const to = cur != null ? clamp(cur - 8, 0, 100) : null;
+        out.push({
+          id: "brake-pressure",
+          area: "Brake pressure",
+          confidence: "medium",
+          kind: "fix",
+          field: "brakePressure",
+          recommendation:
+            cur != null ? `Brake pressure ${r0(cur)}% → ~${r0(to!)}%` : "Lower brake pressure ~8%",
+          why: `Both axles lock about equally (${pct(s.frontLockFrac)} F / ${pct(s.rearLockFrac)} R) — that's too much overall braking force, not a front/rear balance issue. The balance is fine.`,
+          outcome:
+            "Less locking and better threshold-braking control. Trade-off: go too soft and stopping distances grow.",
+          viz: { kind: "bar", value: lockMax, tone: "lock" },
+        });
+      }
     }
   }
 
@@ -439,11 +445,27 @@ export function analyzeSession(
     }
   }
 
-  // ---- Damping: oscillation -> rebound (low confidence) --------------------
+  // ---- Damping: oscillation -> rebound (low confidence, capped) ------------
   if (p.rules.damping && s.drivingFrames >= 400) {
+    const DAMP_MAX = 20;
     const dampCard = (axle: "front" | "rear", rate: number, key: "frontRebound" | "rearRebound") => {
-      if (rate < 2.5) return;
+      if (rate < 3.5) return; // higher bar so it doesn't fire on normal bumps
       const cur = tune[key];
+      if (cur != null && cur >= DAMP_MAX - 0.5) {
+        // already maxed — damping isn't the lever; springs are
+        out.push({
+          id: `damping-${axle}`,
+          area: `${cap(axle)} damping`,
+          confidence: "low",
+          kind: "fix",
+          recommendation: `${cap(axle)} rebound is already maxed (${cur}) — if it still bounces, stiffen ${axle} springs instead`,
+          why: `The ${axle} still oscillates ~${rate.toFixed(1)}×/s with rebound at max, so adding damping won't help — the ${axle} springs are likely too soft. (Low confidence; rough surfaces inflate this.)`,
+          outcome: "Stiffer springs settle the platform without maxing damping. Trade-off: slightly less mechanical grip.",
+          viz: { kind: "bar", value: clamp(rate / 6, 0, 1), tone: "warn" },
+        });
+        return;
+      }
+      const to = cur != null ? Math.min(DAMP_MAX, cur + 2) : null;
       out.push({
         id: `damping-${axle}`,
         area: `${cap(axle)} damping`,
@@ -451,12 +473,15 @@ export function analyzeSession(
         kind: "fix",
         recommendation:
           cur != null
-            ? `${cap(axle)} rebound ${cur} → ~${r0(cur + 2)}`
+            ? `${cap(axle)} rebound ${cur} → ${to}`
             : `Raise ${axle} rebound a little (and a touch of bump)`,
         why: `The ${axle} suspension changes direction ~${rate.toFixed(1)}×/s — a sign it may be under-damped (bouncing rather than settling). Rough surfaces inflate this, so it's low-confidence.`,
         outcome:
           "Settles the platform faster for steadier grip. Trade-off: too much damping feels harsh and skips over bumps.",
-        viz: { kind: "bar", value: clamp(rate / 6, 0, 1), tone: "warn" },
+        viz:
+          cur != null
+            ? { kind: "delta", from: cur, to: to!, min: 1, max: DAMP_MAX, unit: "" }
+            : { kind: "bar", value: clamp(rate / 6, 0, 1), tone: "warn" },
       });
     };
     dampCard("front", s.frontReversalRate, "frontRebound");
