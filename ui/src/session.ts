@@ -38,6 +38,11 @@ export interface SessionSummary {
   avgFrontSlipAngle: number; // mean |front slip angle| in corners (rad)
   avgRearSlipAngle: number; // mean |rear slip angle| in corners (rad)
   corneringFrames: number;
+  maxLatG: number; // peak lateral g seen
+  nearLimitFrac: number; // fraction of cornering frames at/over the grip limit
+  highSpeedCornerFrames: number; // cornering above ~108 km/h
+  highSpeedNearLimitFrac: number; // of those, fraction at the grip limit
+  highSpeedUndersteerRatio: number; // front/rear slip-angle ratio in fast corners
   brakingFrames: number;
   powerFrames: number;
   tireTempAvg: Record<CornerKey, number>;
@@ -66,6 +71,12 @@ export class SessionAggregator {
   private corneringFrames = 0;
   private frontSASum = 0;
   private rearSASum = 0;
+  private maxLatG = 0;
+  private nearLimit = 0;
+  private hsCorner = 0;
+  private hsNearLimit = 0;
+  private hsFrontSA = 0;
+  private hsRearSA = 0;
   private bottom = { front: 0, rear: 0 };
   private top = { front: 0, rear: 0 };
   private tempSum: Record<CornerKey, number> = { fl: 0, fr: 0, rl: 0, rr: 0 };
@@ -89,6 +100,12 @@ export class SessionAggregator {
     this.corneringFrames = 0;
     this.frontSASum = 0;
     this.rearSASum = 0;
+    this.maxLatG = 0;
+    this.nearLimit = 0;
+    this.hsCorner = 0;
+    this.hsNearLimit = 0;
+    this.hsFrontSA = 0;
+    this.hsRearSA = 0;
     this.bottom = { front: 0, rear: 0 };
     this.top = { front: 0, rear: 0 };
     this.tempSum = { fl: 0, fr: 0, rl: 0, rr: 0 };
@@ -160,11 +177,29 @@ export class SessionAggregator {
       if (rl >= 0.18) this.rearLock++;
     }
 
-    // cornering balance (slip angles)
+    // lateral g (any frame)
+    this.maxLatG = Math.max(this.maxLatG, Math.abs(f.accel.x) / 9.81);
+
+    // cornering balance (slip angles) + grip-limit usage
     if (Math.abs(f.steer) >= 0.25 && f.speed > 12) {
       this.corneringFrames++;
-      this.frontSASum += (Math.abs(f.tires.fl.slipAngle) + Math.abs(f.tires.fr.slipAngle)) / 2;
-      this.rearSASum += (Math.abs(f.tires.rl.slipAngle) + Math.abs(f.tires.rr.slipAngle)) / 2;
+      const frontSA = (Math.abs(f.tires.fl.slipAngle) + Math.abs(f.tires.fr.slipAngle)) / 2;
+      const rearSA = (Math.abs(f.tires.rl.slipAngle) + Math.abs(f.tires.rr.slipAngle)) / 2;
+      this.frontSASum += frontSA;
+      this.rearSASum += rearSA;
+      const maxCombined = Math.max(
+        f.tires.fl.combinedSlip,
+        f.tires.fr.combinedSlip,
+        f.tires.rl.combinedSlip,
+        f.tires.rr.combinedSlip,
+      );
+      if (maxCombined >= 0.9) this.nearLimit++;
+      if (f.speed >= 30) {
+        this.hsCorner++;
+        if (maxCombined >= 0.9) this.hsNearLimit++;
+        this.hsFrontSA += frontSA;
+        this.hsRearSA += rearSA;
+      }
     }
 
     // suspension extremes
@@ -238,6 +273,11 @@ export class SessionAggregator {
       avgFrontSlipAngle: this.corneringFrames > 0 ? this.frontSASum / this.corneringFrames : 0,
       avgRearSlipAngle: this.corneringFrames > 0 ? this.rearSASum / this.corneringFrames : 0,
       corneringFrames: this.corneringFrames,
+      maxLatG: this.maxLatG,
+      nearLimitFrac: this.corneringFrames > 0 ? this.nearLimit / this.corneringFrames : 0,
+      highSpeedCornerFrames: this.hsCorner,
+      highSpeedNearLimitFrac: this.hsCorner > 0 ? this.hsNearLimit / this.hsCorner : 0,
+      highSpeedUndersteerRatio: this.hsRearSA > 0.001 ? this.hsFrontSA / this.hsRearSA : 1,
       brakingFrames: this.brakingFrames,
       powerFrames: this.powerFrames,
       tireTempAvg: { fl: avg("fl"), fr: avg("fr"), rl: avg("rl"), rr: avg("rr") },

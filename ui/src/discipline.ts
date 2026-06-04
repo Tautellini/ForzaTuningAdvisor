@@ -18,6 +18,8 @@ export interface DisciplineProfile {
     tireTemp: boolean;
     drift: boolean; // drift-specific rotation advice
     dragLaunch: boolean; // launch traction advice
+    aero: boolean; // downforce level + front/rear balance
+    opportunity: boolean; // surface headroom-based opportunities (bias-driven)
   };
   thr: {
     wheelspin: number; // frac of on-power frames before flagging
@@ -43,6 +45,8 @@ const BASE_RULES: DisciplineProfile["rules"] = {
   tireTemp: true,
   drift: false,
   dragLaunch: false,
+  aero: true,
+  opportunity: true,
 };
 
 export const DISCIPLINES: DisciplineProfile[] = [
@@ -82,7 +86,7 @@ export const DISCIPLINES: DisciplineProfile[] = [
     id: "dirt",
     label: "Dirt",
     blurb: "Loose surface — wheelspin and slides are expected; balance still matters.",
-    rules: { ...BASE_RULES },
+    rules: { ...BASE_RULES, aero: false },
     thr: {
       wheelspin: 0.42,
       bottoming: 0.16,
@@ -98,7 +102,7 @@ export const DISCIPLINES: DisciplineProfile[] = [
     id: "offroad",
     label: "Offroad",
     blurb: "Rough terrain & jumps — run high and soft; bottoming is partly unavoidable.",
-    rules: { ...BASE_RULES, topping: false },
+    rules: { ...BASE_RULES, topping: false, aero: false },
     thr: {
       wheelspin: 0.55,
       bottoming: 0.28,
@@ -121,6 +125,7 @@ export const DISCIPLINES: DisciplineProfile[] = [
       balance: false, // never 'fix' oversteer
       topping: false,
       drift: true,
+      aero: false,
     },
     thr: {
       wheelspin: 1.1, // effectively off
@@ -146,6 +151,8 @@ export const DISCIPLINES: DisciplineProfile[] = [
       balance: false,
       tireTemp: false,
       dragLaunch: true,
+      aero: false,
+      opportunity: false,
     },
     thr: {
       wheelspin: 0.12, // launch sensitivity

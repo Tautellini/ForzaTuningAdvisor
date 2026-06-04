@@ -8,12 +8,14 @@ import {
   saveDiscipline,
   type DisciplineId,
 } from "./discipline";
+import { loadPriorities, savePriorities, type PriorityId } from "./priorities";
 import { ConnectionBar } from "./components/ConnectionBar";
 import { SessionBar } from "./components/SessionBar";
 import { ModeSelector } from "./components/ModeSelector";
 import { Dashboard } from "./components/Dashboard";
 import { AdvicePanel } from "./components/AdvicePanel";
 import { TunePanel } from "./components/TunePanel";
+import { PriorityBar } from "./components/PriorityBar";
 
 const DEFAULT_URL = "ws://127.0.0.1:5301";
 const URL_KEY = "fta.bridgeUrl";
@@ -22,13 +24,21 @@ export default function App() {
   const [url, setUrl] = useState(() => localStorage.getItem(URL_KEY) ?? DEFAULT_URL);
   const [tune, setTune] = useState<CurrentTune>(() => loadTune());
   const [discipline, setDiscipline] = useState<DisciplineId>(() => loadDiscipline());
+  const [priorities, setPriorities] = useState<PriorityId[]>(() => loadPriorities());
   const { conn, latest, driving, hz, summary, reset } = useTelemetry(url);
   const profile = DISCIPLINE_BY_ID[discipline];
-  const advice = useMemo(() => analyzeSession(summary, tune, profile), [summary, tune, profile]);
+  const advice = useMemo(
+    () => analyzeSession(summary, tune, profile, priorities),
+    [summary, tune, profile, priorities],
+  );
 
   const changeDiscipline = (id: DisciplineId) => {
     setDiscipline(id);
     saveDiscipline(id);
+  };
+  const changePriorities = (p: PriorityId[]) => {
+    setPriorities(p);
+    savePriorities(p);
   };
 
   const changeUrl = (u: string) => {
@@ -53,11 +63,12 @@ export default function App() {
           <div className="content-wrap">
             <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
             <SessionBar summary={summary} onReset={reset} />
-            <div className="content">
-              <div className="left-col">
-                {latest && <Dashboard t={latest} />}
-                <TunePanel tune={tune} onChange={setTune} />
-              </div>
+            <div className="topblock">
+              {latest && <Dashboard t={latest} />}
+              <TunePanel tune={tune} onChange={setTune} />
+            </div>
+            <div className="advice-wrap">
+              <PriorityBar priorities={priorities} onChange={changePriorities} />
               <AdvicePanel advice={advice} enoughData={enoughData} />
             </div>
           </div>
