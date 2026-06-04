@@ -202,45 +202,59 @@ export function analyzeSession(
     });
   }
 
-  // ---- Gearing: ratio spacing (what to change per gear) --------------------
+  // ---- Gearing: flag gears you bog out of (land below the torque band) ------
   if (p.rules.shiftPoints && gearing.shifts.length > 0) {
     const ratios = tune.gearRatios ?? [];
-    // Land near the power band after each shift; flag gears that drop too far / too little.
-    const targetLand = Math.round(gearing.peakPowerRpm * 0.88);
+    // Floor = peak torque: drop below this after a shift and you're genuinely bogging.
+    const floor = gearing.peakTorqueRpm > 0 ? gearing.peakTorqueRpm : Math.round(gearing.peakPowerRpm * 0.7);
+    const target = floor * 1.05; // aim to land just above the torque peak
+
     const cand = gearing.shifts
       .map((sft) => {
-        const kCur = s.gears[sft.from]?.k ?? 0;
-        const kNext = s.gears[sft.to]?.k ?? 0;
-        if (kCur <= 0 || kNext <= 0) return null;
-        const landing = sft.rpm * (kNext / kCur);
-        const off = (landing - targetLand) / targetLand;
-        return { sft, landing, off };
+        const rFrom = ratios[sft.from - 1];
+        const rTo = ratios[sft.to - 1];
+        const exact = Number.isFinite(rFrom) && Number.isFinite(rTo) && (rFrom as number) > 0;
+        const drop = exact
+          ? (rTo as number) / (rFrom as number)
+          : (s.gears[sft.to]?.k ?? 0) / (s.gears[sft.from]?.k ?? 0);
+        if (!Number.isFinite(drop) || drop <= 0 || drop >= 1) return null;
+        const landing = sft.rpm * drop;
+        return { sft, landing, exact, rFrom, rTo };
       })
-      .filter((x): x is { sft: { from: number; to: number; rpm: number }; landing: number; off: number } => !!x && Math.abs(x.off) >= 0.1)
-      .sort((a, b) => Math.abs(b.off) - Math.abs(a.off))
+      .filter((x): x is NonNullable<typeof x> => !!x && x.landing < floor) // only genuine bog
+      .sort((a, b) => a.landing - b.landing)
       .slice(0, 2);
 
     for (const c of cand) {
-      const tooTall = c.landing < targetLand; // drops below the band -> shorten upper gear
-      const factor = targetLand / c.landing; // multiply the upper gear's ratio by this
-      const pctChange = Math.round(Math.abs(factor - 1) * 100);
-      const cur = ratios[c.sft.to - 1];
-      const hasRatio = cur != null && Number.isFinite(cur);
+      const g = c.sft.to;
+      const rTo = c.rTo as number;
+      const rFrom = c.rFrom as number;
+      let rec: string;
+      let viz: AdviceViz;
+      if (c.exact) {
+        // ratio that lands you at `target`, clamped strictly between neighbouring gears
+        const rNext = ratios[g]; // gear g+1 (taller -> smaller number)
+        const upper = rFrom - 0.05; // must stay shorter than the gear below
+        const lower = Number.isFinite(rNext) ? (rNext as number) + 0.05 : rTo * 1.02;
+        const want = rFrom * (target / c.sft.rpm);
+        const newR = clamp(want, lower, upper);
+        if (newR <= rTo + 0.02) continue; // can't meaningfully shorten without crossing a neighbour
+        rec = `${g}${ord(g)} gear ${r2(rTo)} → ~${r2(newR)}`;
+        viz = { kind: "delta", from: rTo, to: Math.round(newR * 100) / 100, min: lower, max: upper, unit: "ratio" };
+      } else {
+        const pctChange = clamp(r0((target / c.landing - 1) * 100), 3, 15);
+        rec = `Shorten ${g}${ord(g)} gear ~${pctChange}% (enter your ratios for an exact target)`;
+        viz = { kind: "dir", dir: "more", label: "shorter gear" };
+      }
       out.push({
-        id: `gearing-ratio-${c.sft.to}`,
-        area: `Gearing — ${c.sft.to}${ord(c.sft.to)} gear`,
+        id: `gearing-ratio-${g}`,
+        area: `Gearing — ${g}${ord(g)} gear`,
         confidence: "medium",
         kind: "fix",
-        recommendation: hasRatio
-          ? `${c.sft.to}${ord(c.sft.to)} gear ${r2(cur!)} → ~${r2(cur! * factor)}`
-          : `${tooTall ? "Shorten" : "Lengthen"} ${c.sft.to}${ord(c.sft.to)} gear ~${pctChange}%`,
-        why: `After upshifting ${c.sft.from}→${c.sft.to} you drop to ~${r0(c.landing)} rpm — ${tooTall ? "below" : "above"} the power band (peak power ${r0(gearing.peakPowerRpm)} rpm). The gap to ${c.sft.to}${ord(c.sft.to)} is too ${tooTall ? "big" : "small"}.`,
-        outcome: tooTall
-          ? "Lands you back near peak power for stronger acceleration out of each shift. Trade-off: you'll shift a touch more often."
-          : "Uses more of each gear with fewer shifts. Trade-off: slightly less punch right after the shift.",
-        viz: hasRatio
-          ? { kind: "delta", from: cur!, to: Math.round(cur! * factor * 100) / 100, min: 0, max: Math.max(5, cur! * 1.5), unit: "ratio" }
-          : { kind: "dir", dir: tooTall ? "more" : "less", label: tooTall ? "shorter gear" : "taller gear" },
+        recommendation: rec,
+        why: `After upshifting ${c.sft.from}→${g} you fall to ~${r0(c.landing)} rpm — below peak torque (${r0(gearing.peakTorqueRpm)} rpm), so the engine bogs out of the shift. Closing the gap keeps it pulling.`,
+        outcome: "Stronger acceleration out of that shift (no bogging). Trade-off: you'll shift a touch more often.",
+        viz,
       });
     }
   }
