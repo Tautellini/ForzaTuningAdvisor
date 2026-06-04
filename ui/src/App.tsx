@@ -80,10 +80,7 @@ export default function App() {
           <Waiting message="Connected to the bridge — waiting for the first packet…" />
         ) : (
           <div className="content-wrap">
-            <div className="topcontrols">
-              <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
-              <SettingsBar units={units} onChange={changeUnits} />
-            </div>
+            <LivePanel t={latest} units={units} />
             <TunePanel
               tune={tune}
               units={units}
@@ -100,7 +97,10 @@ export default function App() {
               onDelete={tel.deleteSession}
               onClear={tel.clearAll}
             />
-            <LivePanel t={latest} units={units} />
+            <div className="topcontrols">
+              <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
+              <SettingsBar units={units} onChange={changeUnits} />
+            </div>
             <div className="vizrow">
               <PowerCurveChart summary={computed} liveRpm={latest.rpm.cur} />
               <TractionBrakes summary={computed} tune={tune} />
