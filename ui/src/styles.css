@@ -2210,3 +2210,14 @@ body {
 .advice-titlebar {
   align-items: center;
 }
+
+/* ---- equal-height top bar components ---- */
+.stickybar {
+  align-items: stretch;
+}
+.carstrip {
+  align-items: center; /* center car within the stretched height */
+}
+.stickybar-sessions .sessionstrip {
+  height: 100%;
+}
