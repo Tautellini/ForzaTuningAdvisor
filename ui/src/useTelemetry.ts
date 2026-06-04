@@ -10,6 +10,8 @@ export interface TelemetryState {
   latest: Telemetry | null;
   driving: boolean;
   hz: number;
+  /** Last car seen while actually driving (survives menus & refresh). */
+  lastCar: Telemetry["car"] | null;
   /** Bumps whenever something the UI derives from the store may have changed. */
   rev: number;
   store: SessionStore;
@@ -27,6 +29,15 @@ export function useTelemetry(url: string, discipline: DisciplineId): TelemetrySt
   const [hz, setHz] = useState(0);
   const [rev, setRev] = useState(0);
   const bump = useCallback(() => setRev((r) => r + 1), []);
+
+  const [lastCar, setLastCar] = useState<Telemetry["car"] | null>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("fta.lastCar") ?? "null");
+    } catch {
+      return null;
+    }
+  });
+  const lastCarRef = useRef<Telemetry["car"] | null>(lastCar);
 
   const store = useRef(new SessionStore());
   const disciplineRef = useRef(discipline);
@@ -82,6 +93,15 @@ export function useTelemetry(url: string, discipline: DisciplineId): TelemetrySt
         setLatest(t);
         setDriving(t.raceOn === 1);
         store.current.feed(t, disciplineRef.current);
+        // Remember the real car (only valid while driving), persist it.
+        if (t.raceOn === 1) {
+          const prev = lastCarRef.current;
+          if (!prev || prev.ordinal !== t.car.ordinal || prev.drivetrain !== t.car.drivetrain) {
+            lastCarRef.current = t.car;
+            setLastCar(t.car);
+            localStorage.setItem("fta.lastCar", JSON.stringify(t.car));
+          }
+        }
       };
       ws.onclose = () => {
         setConn("closed");
@@ -114,6 +134,7 @@ export function useTelemetry(url: string, discipline: DisciplineId): TelemetrySt
     latest,
     driving,
     hz,
+    lastCar,
     rev,
     store: store.current,
     endCurrent,

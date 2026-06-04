@@ -40,7 +40,7 @@ export default function App() {
   const [units, setUnits] = useState<Units>(() => loadUnits());
 
   const tel = useTelemetry(url, discipline);
-  const { conn, latest, driving, hz, rev, store } = tel;
+  const { conn, latest, driving, hz, rev, store, lastCar } = tel;
   const profile = DISCIPLINE_BY_ID[discipline];
 
   // Everything derived from the store recomputes when rev bumps (live + actions).
@@ -87,7 +87,7 @@ export default function App() {
             <TunePanel
               tune={tune}
               units={units}
-              drivetrain={latest.car.drivetrain}
+              drivetrain={lastCar?.drivetrain ?? (driving ? latest.car.drivetrain : undefined)}
               onChange={setTune}
             />
             <SessionStrip
