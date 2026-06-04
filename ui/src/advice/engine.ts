@@ -2,6 +2,7 @@ import type { SessionSummary } from "../session";
 import type { CurrentTune } from "../tune";
 import type { DisciplineProfile } from "../discipline";
 import type { PriorityId } from "../priorities";
+import { lengthShort, pressureStep, pressureUnit, rideStep, tempC, type Units } from "../units";
 
 export type Confidence = "high" | "medium" | "low";
 export type AdviceKind = "fix" | "opportunity";
@@ -104,6 +105,7 @@ export function analyzeSession(
   tune: CurrentTune,
   p: DisciplineProfile,
   priorities: PriorityId[],
+  u: Units,
 ): Advice[] {
   if (!s || s.drivingFrames < MIN.frames) return [];
   const out: Advice[] = [];
@@ -265,7 +267,7 @@ export function analyzeSession(
           : `Raise ${end} ride height, or stiffen ${end} springs ~10%`;
         const rec =
           tune[rhKey] != null && !p.preferHigherRide
-            ? `${end[0].toUpperCase() + end.slice(1)} ride height ${r1(tune[rhKey]!)} → ~${r1(tune[rhKey]! + 1)}`
+            ? `${end[0].toUpperCase() + end.slice(1)} ride height ${r1(tune[rhKey]!)} → ~${r1(tune[rhKey]! + rideStep(u))} ${lengthShort(u)}`
             : action;
         out.push({
           id: `bottoming-${end}`,
@@ -424,9 +426,10 @@ export function analyzeSession(
     if (hot.length > 0) {
       const frontHot = hot.some((k) => k.startsWith("f"));
       const pKey = frontHot ? "frontPressure" : "rearPressure";
+      const pUnit = pressureUnit(u);
       const rec =
         tune[pKey] != null
-          ? `${frontHot ? "Front" : "Rear"} pressure ${r1(tune[pKey]!)} → try ~${r1(tune[pKey]! - 1)} psi`
+          ? `${frontHot ? "Front" : "Rear"} pressure ${r1(tune[pKey]!)} → try ~${r1(tune[pKey]! - pressureStep(u))} ${pUnit}`
           : `Ease the load on ${hot.map((k) => k.toUpperCase()).join(", ")} (softer that end, or smoother inputs)`;
       out.push({
         id: "tire-hot",
@@ -434,7 +437,7 @@ export function analyzeSession(
         confidence: "low",
         kind: "fix",
         recommendation: rec,
-        why: `${hot.map((k) => `${k.toUpperCase()} avg ${r0(s.tireTempAvg[k])}°F`).join(", ")} — those tires run hottest, so they're working hardest.`,
+        why: `${hot.map((k) => { const tc = tempC(s.tireTempAvg[k], u); return `${k.toUpperCase()} avg ${r0(tc.v)}${tc.unit}`; }).join(", ")} — those tires run hottest, so they're working hardest.`,
         outcome:
           "Cooler, more consistent tires. Note: the feed can't read pressure, so this is a hint, not a measured value.",
         viz: {

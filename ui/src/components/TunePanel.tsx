@@ -1,12 +1,14 @@
 import type { CurrentTune } from "../tune";
 import { TUNE_FIELDS, saveTune } from "../tune";
+import type { Units } from "../units";
 
 interface Props {
   tune: CurrentTune;
+  units: Units;
   onChange: (t: CurrentTune) => void;
 }
 
-export function TunePanel({ tune, onChange }: Props) {
+export function TunePanel({ tune, units, onChange }: Props) {
   const set = (key: keyof CurrentTune, raw: string) => {
     const next = { ...tune };
     if (raw.trim() === "") delete next[key];
@@ -15,31 +17,30 @@ export function TunePanel({ tune, onChange }: Props) {
     saveTune(next);
   };
 
-  const filled = TUNE_FIELDS.filter((f) => tune[f.key] != null).length;
-
   return (
-    <section className="tunepanel">
-      <div className="tune-headrow">
-        <h3>Your current tune</h3>
-        <span className="tune-count">{filled > 0 ? `${filled} set` : "optional"}</span>
+    <section className="tunestrip">
+      <div className="tunestrip-head">
+        <span className="tunestrip-title">Current tune</span>
+        <span className="tunestrip-sub">applies to every session below — enter it for target numbers</span>
       </div>
-      <p className="tune-hint">
-        Telemetry can't see your tune, so enter it to turn directional advice into target numbers.
-        Blank fields stay directional. Saved on this device only.
-      </p>
-      <div className="tune-grid">
+      <div className="tunestrip-fields">
         {TUNE_FIELDS.map((f) => (
-          <label key={f.key} className="tune-field">
-            <span className="tune-label">
-              {f.label} <span className="tune-unit">{f.hint}</span>
+          <label key={f.key} className={`tunechip ${tune[f.key] != null ? "set" : ""}`} title={f.label}>
+            <span className="tc-icon">{f.icon}</span>
+            <span className="tc-body">
+              <span className="tc-label">{f.label}</span>
+              <span className="tc-inputrow">
+                <input
+                  type="number"
+                  step="any"
+                  inputMode="decimal"
+                  placeholder="—"
+                  value={tune[f.key] ?? ""}
+                  onChange={(e) => set(f.key, e.target.value)}
+                />
+                <span className="tc-unit">{f.unit(units)}</span>
+              </span>
             </span>
-            <input
-              type="number"
-              step="any"
-              inputMode="decimal"
-              value={tune[f.key] ?? ""}
-              onChange={(e) => set(f.key, e.target.value)}
-            />
           </label>
         ))}
       </div>

@@ -1,5 +1,6 @@
 import type { CornerKey, Telemetry } from "../types";
 import { DRIVETRAIN } from "../types";
+import { power as powerU, pressure, speed as speedU, tempC, type Units } from "../units";
 
 function tempColor(f: number): string {
   const c = Math.max(120, Math.min(260, f));
@@ -7,7 +8,6 @@ function tempColor(f: number): string {
   return `hsl(${210 - t * 210}, 75%, 50%)`;
 }
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
-const mps2kmh = (v: number) => Math.round(v * 3.6);
 function gearLabel(g: number): string {
   if (g === 0) return "R";
   if (g === 11) return "N";
@@ -26,10 +26,13 @@ function drivenSet(dt: number): Set<CornerKey> {
   return new Set<CornerKey>(["fl", "fr", "rl", "rr"]);
 }
 
-export function LivePanel({ t }: { t: Telemetry }) {
+export function LivePanel({ t, units }: { t: Telemetry; units: Units }) {
   const rpmPct = t.rpm.max > 0 ? Math.min(1, t.rpm.cur / t.rpm.max) : 0;
   const nearLimit = rpmPct >= 0.95;
   const driven = drivenSet(t.car.drivetrain);
+  const sp = speedU(t.speed, units);
+  const pw = powerU(t.power, units);
+  const bo = pressure(t.boost, units);
 
   const fSA = (Math.abs(t.tires.fl.slipAngle) + Math.abs(t.tires.fr.slipAngle)) / 2;
   const rSA = (Math.abs(t.tires.rl.slipAngle) + Math.abs(t.tires.rr.slipAngle)) / 2;
@@ -56,8 +59,8 @@ export function LivePanel({ t }: { t: Telemetry }) {
         <div className="live-speedgear">
           <div className="gear">{gearLabel(t.gear)}</div>
           <div className="speed">
-            {mps2kmh(t.speed)}
-            <span className="unit"> km/h</span>
+            {Math.round(sp.v)}
+            <span className="unit"> {sp.unit}</span>
           </div>
         </div>
         <div className={`rpm-bar ${nearLimit ? "redline" : ""}`}>
@@ -128,7 +131,7 @@ export function LivePanel({ t }: { t: Telemetry }) {
                 />
                 {driven.has(w.key) && <circle cx={w.cx} cy={w.cy} r="3" className="driven-dot" />}
                 <text x={w.cx} y={w.cy + 42} className="wheel-temp" textAnchor="middle">
-                  {Math.round(c.temp)}°
+                  {Math.round(tempC(c.temp, units).v)}°
                 </text>
               </g>
             );
@@ -144,8 +147,8 @@ export function LivePanel({ t }: { t: Telemetry }) {
       {/* right: stats */}
       <div className="live-stats">
         <Stat label="Car" value={`${t.car.pi} PI`} sub={DRIVETRAIN[t.car.drivetrain] ?? "?"} />
-        <Stat label="Power" value={`${Math.round(t.power / 1000)}`} sub="kW" />
-        <Stat label="Boost" value={`${t.boost.toFixed(1)}`} sub="psi" />
+        <Stat label="Power" value={`${Math.round(pw.v)}`} sub={pw.unit} />
+        <Stat label="Boost" value={`${bo.v.toFixed(units.system === "imperial" ? 1 : 2)}`} sub={bo.unit} />
         <Stat label="Fuel" value={`${Math.round(t.fuel * 100)}`} sub="%" />
         <Stat label="Lateral" value={`${(t.accel.x / 9.81).toFixed(2)}`} sub="g" />
       </div>

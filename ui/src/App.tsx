@@ -9,9 +9,11 @@ import {
   type DisciplineId,
 } from "./discipline";
 import { loadPriorities, savePriorities, type PriorityId } from "./priorities";
+import { loadUnits, saveUnits, type Units } from "./units";
 import { ConnectionBar } from "./components/ConnectionBar";
 import { SessionStrip } from "./components/SessionStrip";
 import { ModeSelector } from "./components/ModeSelector";
+import { SettingsBar } from "./components/SettingsBar";
 import { LivePanel } from "./components/LivePanel";
 import { PowerCurveChart } from "./components/PowerCurveChart";
 import { TractionBrakes } from "./components/TractionBrakes";
@@ -35,6 +37,7 @@ export default function App() {
   const [tune, setTune] = useState<CurrentTune>(() => loadTune());
   const [discipline, setDiscipline] = useState<DisciplineId>(() => loadDiscipline());
   const [priorities, setPriorities] = useState<PriorityId[]>(() => loadPriorities());
+  const [units, setUnits] = useState<Units>(() => loadUnits());
 
   const tel = useTelemetry(url, discipline);
   const { conn, latest, driving, hz, rev, store } = tel;
@@ -43,8 +46,8 @@ export default function App() {
   // Everything derived from the store recomputes when rev bumps (live + actions).
   const computed = useMemo(() => store.computedSummary(), [store, rev]);
   const advice = useMemo(
-    () => analyzeSession(computed, tune, profile, priorities),
-    [computed, tune, profile, priorities],
+    () => analyzeSession(computed, tune, profile, priorities, units),
+    [computed, tune, profile, priorities, units],
   );
 
   const changeUrl = (u: string) => {
@@ -58,6 +61,10 @@ export default function App() {
   const changePriorities = (p: PriorityId[]) => {
     setPriorities(p);
     savePriorities(p);
+  };
+  const changeUnits = (u: Units) => {
+    setUnits(u);
+    saveUnits(u);
   };
 
   const enoughData = (computed?.drivingFrames ?? 0) >= 120;
@@ -73,7 +80,11 @@ export default function App() {
           <Waiting message="Connected to the bridge — waiting for the first packet…" />
         ) : (
           <div className="content-wrap">
-            <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
+            <div className="topcontrols">
+              <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
+              <SettingsBar units={units} onChange={changeUnits} />
+            </div>
+            <TunePanel tune={tune} units={units} onChange={setTune} />
             <SessionStrip
               store={store}
               recording={store.recording}
@@ -84,13 +95,12 @@ export default function App() {
               onDelete={tel.deleteSession}
               onClear={tel.clearAll}
             />
-            <LivePanel t={latest} />
+            <LivePanel t={latest} units={units} />
             <div className="vizrow">
               <PowerCurveChart summary={computed} liveRpm={latest.rpm.cur} />
               <TractionBrakes summary={computed} tune={tune} />
             </div>
             <Coverage summary={computed} />
-            <TunePanel tune={tune} onChange={setTune} />
             <div className="advice-wrap">
               <PriorityBar priorities={priorities} onChange={changePriorities} />
               <AdvicePanel advice={advice} enoughData={enoughData} />
