@@ -6,6 +6,28 @@ import { lengthShort, pressureStep, pressureUnit, rideStep, tempC, type Units } 
 
 export type Confidence = "high" | "medium" | "low";
 export type AdviceKind = "fix" | "opportunity";
+export type AdviceGroup =
+  | "tires"
+  | "gearing"
+  | "alignment"
+  | "arb"
+  | "springs"
+  | "damping"
+  | "aero"
+  | "brakes"
+  | "diff"
+  | "general";
+
+function groupForId(id: string): AdviceGroup {
+  if (id.startsWith("gearing")) return "gearing";
+  if (id === "drag-aero" || id.startsWith("aero")) return "aero";
+  if (id.startsWith("brake")) return "brakes";
+  if (id.startsWith("diff") || id.startsWith("drift") || id === "drag-launch") return "diff";
+  if (id.startsWith("bottoming") || id.startsWith("unload")) return "springs";
+  if (id.startsWith("balance")) return "arb";
+  if (id.startsWith("tire")) return "tires";
+  return "general";
+}
 
 export type AdviceViz =
   | { kind: "balance"; ratio: number } // front/rear slip ratio; 1 = neutral
@@ -18,6 +40,7 @@ export interface Advice {
   area: string;
   confidence: Confidence;
   kind: AdviceKind;
+  group?: AdviceGroup; // assigned from id at return time
   recommendation: string; // the action (includes concrete numbers when available)
   why: string; // evidence from the session data
   outcome: string; // expected result + trade-off
@@ -489,7 +512,7 @@ export function analyzeSession(
     }
   }
 
-  return out;
+  return out.map((a) => ({ ...a, group: groupForId(a.id) }));
 }
 
 export const CONFIDENCE_RANK: Record<Confidence, number> = { high: 0, medium: 1, low: 2 };
