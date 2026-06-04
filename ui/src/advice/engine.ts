@@ -2,13 +2,6 @@ import type { SessionSummary } from "../session";
 import type { CurrentTune } from "../tune";
 import type { DisciplineProfile } from "../discipline";
 import type { PriorityId } from "../priorities";
-import type { SnapshotMetrics } from "../tuninglog";
-import type { DisciplineId } from "../discipline";
-
-export interface LoopRef {
-  discipline: DisciplineId;
-  m: SnapshotMetrics;
-}
 
 export type Confidence = "high" | "medium" | "low";
 export type AdviceKind = "fix" | "opportunity";
@@ -28,7 +21,6 @@ export interface Advice {
   why: string; // evidence from the session data
   outcome: string; // expected result + trade-off
   viz?: AdviceViz;
-  trend?: string; // loop feedback vs the previous tuning-log snapshot
 }
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
@@ -112,12 +104,9 @@ export function analyzeSession(
   tune: CurrentTune,
   p: DisciplineProfile,
   priorities: PriorityId[],
-  prev?: LoopRef | null,
 ): Advice[] {
   if (!s || s.drivingFrames < MIN.frames) return [];
   const out: Advice[] = [];
-  // Loop feedback only makes sense against the same discipline.
-  const last = prev && prev.discipline === p.id ? prev : null;
   const rankOf = (id: PriorityId) => {
     const i = priorities.indexOf(id);
     return i < 0 ? 99 : i;
@@ -295,25 +284,10 @@ export function analyzeSession(
     }
   }
 
-  // ---- Handling balance: under / oversteer (adaptive + loop feedback) -------
+  // ---- Handling balance: under / oversteer (adaptive to severity) ----------
   if (p.rules.balance && s.corneringFrames >= MIN.cornering) {
     if (s.understeerRatio >= p.thr.understeerHigh) {
-      const sev = s.understeerRatio - 1;
-      let stepMul = 1;
-      let trend: string | undefined;
-      if (last) {
-        const was = last.m.understeerRatio;
-        const improved = was - s.understeerRatio;
-        if (was >= p.thr.understeerHigh) {
-          if (improved < 0.08) {
-            stepMul = 1.7;
-            trend = `Barely moved since your last change (was ${r1(was)}, now ${r1(s.understeerRatio)}). The front ARB may not be the limiter — take a bigger step, or add front grip (softer front springs / more front tire).`;
-          } else {
-            trend = `Improving — front/rear balance went ${r1(was)} → ${r1(s.understeerRatio)}. Keep going, a touch more.`;
-          }
-        }
-      }
-      const step = clamp(r0(sev * 12 * stepMul), 3, 22);
+      const step = clamp(r0((s.understeerRatio - 1) * 14), 3, 22);
       out.push({
         id: "balance-understeer",
         area: "Handling balance",
@@ -327,26 +301,10 @@ export function analyzeSession(
         outcome:
           "Sharper turn-in and more front grip mid-corner. Trade-off: overdo it and it swings to oversteer.",
         viz: { kind: "balance", ratio: s.understeerRatio },
-        trend,
       });
     } else if (s.understeerRatio > 0 && s.understeerRatio <= p.thr.oversteerLow) {
       const ratio = 1 / s.understeerRatio;
-      const sev = ratio - 1;
-      let stepMul = 1;
-      let trend: string | undefined;
-      if (last) {
-        const wasR = last.m.understeerRatio > 0 ? 1 / last.m.understeerRatio : 1;
-        const improved = wasR - ratio;
-        if (last.m.understeerRatio <= p.thr.oversteerLow) {
-          if (improved < 0.08) {
-            stepMul = 1.7;
-            trend = `Barely moved since your last change. Take a bigger step on the front ARB, or soften the rear / ease diff acceleration.`;
-          } else {
-            trend = `Improving — keep going, a touch more.`;
-          }
-        }
-      }
-      const step = clamp(r0(sev * 12 * stepMul), 3, 22);
+      const step = clamp(r0((ratio - 1) * 14), 3, 22);
       out.push({
         id: "balance-oversteer",
         area: "Handling balance",
@@ -360,7 +318,6 @@ export function analyzeSession(
         outcome:
           "More stable rear, easier to get on power. Trade-off: too much and it turns into understeer.",
         viz: { kind: "balance", ratio: s.understeerRatio },
-        trend,
       });
     }
   }

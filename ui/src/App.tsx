@@ -15,7 +15,7 @@ import { ModeSelector } from "./components/ModeSelector";
 import { LivePanel } from "./components/LivePanel";
 import { PowerCurveChart } from "./components/PowerCurveChart";
 import { TractionBrakes } from "./components/TractionBrakes";
-import { TuningLog } from "./components/TuningLog";
+import { Coverage } from "./components/Coverage";
 import { AdvicePanel } from "./components/AdvicePanel";
 import { TunePanel } from "./components/TunePanel";
 import { PriorityBar } from "./components/PriorityBar";
@@ -35,10 +35,9 @@ export default function App() {
 
   // Everything derived from the store recomputes when rev bumps (live + actions).
   const computed = useMemo(() => store.computedSummary(), [store, rev]);
-  const prev = useMemo(() => store.prevRef(), [store, rev]);
   const advice = useMemo(
-    () => analyzeSession(computed, tune, profile, priorities, prev),
-    [computed, tune, profile, priorities, prev],
+    () => analyzeSession(computed, tune, profile, priorities),
+    [computed, tune, profile, priorities],
   );
 
   const changeUrl = (u: string) => {
@@ -83,7 +82,7 @@ export default function App() {
               <PowerCurveChart summary={computed} liveRpm={latest.rpm.cur} />
               <TractionBrakes summary={computed} tune={tune} />
             </div>
-            <TuningLog sessions={store.sessions} />
+            <Coverage summary={computed} />
             <TunePanel tune={tune} onChange={setTune} />
             <div className="advice-wrap">
               <PriorityBar priorities={priorities} onChange={changePriorities} />

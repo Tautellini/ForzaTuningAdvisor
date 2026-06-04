@@ -1,5 +1,5 @@
 import { DRIVETRAIN } from "../types";
-import { MAX_INCLUDED, type SessionStore } from "../sessions";
+import type { SessionStore } from "../sessions";
 
 interface Props {
   store: SessionStore;
@@ -30,7 +30,6 @@ export function SessionStrip({
   onClear,
 }: Props) {
   const effective = store.effectiveCount();
-  const atCap = effective >= MAX_INCLUDED;
 
   return (
     <div className="sessionstrip">
@@ -39,12 +38,13 @@ export function SessionStrip({
           <span className="ss-title">Sessions</span>
           <span className="ss-sub">
             {" "}
-            pick up to {MAX_INCLUDED} to combine for the advice ({effective}/{MAX_INCLUDED} active)
+            all sessions for your current tune are combined ({effective} active). Untick or delete a
+            bad run. Changed the tune? Clear all and record a fresh set.
           </span>
         </div>
         {store.sessions.length > 0 && (
           <button className="link-btn" onClick={onClear}>
-            clear all
+            clear all (new tune)
           </button>
         )}
       </div>
@@ -81,17 +81,11 @@ export function SessionStrip({
         {store.sessions.map((s) => {
           const bal =
             s.m.understeerRatio >= 1.15 ? "understeer" : s.m.understeerRatio <= 0.87 ? "oversteer" : "neutral";
-          const disabled = !s.included && atCap;
           return (
             <div key={s.id} className={`ss-card ${s.included ? "included" : ""}`}>
               <div className="ss-card-top">
-                <label className={`ss-check ${disabled ? "disabled" : ""}`}>
-                  <input
-                    type="checkbox"
-                    checked={s.included}
-                    disabled={disabled}
-                    onChange={() => onToggle(s.id)}
-                  />
+                <label className="ss-check">
+                  <input type="checkbox" checked={s.included} onChange={() => onToggle(s.id)} />
                   {s.label}
                 </label>
                 <button className="ss-del" onClick={() => onDelete(s.id)} title="Delete session">

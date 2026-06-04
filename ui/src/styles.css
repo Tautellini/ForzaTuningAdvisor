@@ -1436,3 +1436,65 @@ body {
   font-size: 11px;
   margin-top: 8px;
 }
+
+/* ---- data coverage ---- */
+.cov-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cov-row {
+  display: grid;
+  grid-template-columns: 18px 96px 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+.cov-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.cov-icon.ok {
+  background: rgba(52, 208, 88, 0.18);
+  color: var(--green);
+}
+.cov-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.cov-track {
+  height: 8px;
+  background: var(--panel-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.cov-fill {
+  height: 100%;
+  background: var(--amber);
+  transition: width 0.3s ease;
+}
+.cov-fill.ok {
+  background: var(--green);
+}
+.cov-note {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+@media (max-width: 620px) {
+  .cov-row {
+    grid-template-columns: 18px 1fr;
+  }
+  .cov-track,
+  .cov-note {
+    grid-column: 2;
+  }
+}

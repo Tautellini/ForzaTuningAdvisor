@@ -17,7 +17,6 @@ export interface RecordedSession {
   label: string;
 }
 
-export const MAX_INCLUDED = 6;
 const MIN_SAVE_FRAMES = 240; // ~4s of driving before a session is worth saving
 const ZERO_GRACE_FRAMES = 90; // ~1.5s of menu/idle ends a session
 const STORE_KEY = "fta.sessions";
@@ -89,7 +88,6 @@ export class SessionStore {
     if (!c || c.data.frames < MIN_SAVE_FRAMES) return false;
     const sum = summarize(c.data);
     if (!sum) return false;
-    const includedNow = this.includedCount();
     const rec: RecordedSession = {
       id: `${c.startedAt}-${this.seq++}`,
       startedAt: c.startedAt,
@@ -100,7 +98,7 @@ export class SessionStore {
       drivetrain: sum.car.drivetrain,
       data: c.data,
       m: metricsFrom(sum),
-      included: includedNow < MAX_INCLUDED,
+      included: true, // all sessions for the current tune are used by default
       label: `Run ${this.sessions.length + 1}`,
     };
     this.sessions.unshift(rec);
@@ -121,7 +119,6 @@ export class SessionStore {
   toggleInclude(id: string) {
     const s = this.sessions.find((x) => x.id === id);
     if (!s) return;
-    if (!s.included && this.effectiveCount() >= MAX_INCLUDED) return; // at the cap
     s.included = !s.included;
     this.persist();
   }
@@ -134,14 +131,11 @@ export class SessionStore {
     this.persist();
   }
 
-  /** Merge the live session + included saved sessions, up to MAX_INCLUDED total. */
+  /** Merge the live session + ALL included saved sessions (same tune set). */
   private computedData(): SessionData {
     const datas: SessionData[] = [];
     if (this.cur && this.cur.data.frames > 0) datas.push(this.cur.data);
-    for (const s of this.sessions) {
-      if (datas.length >= MAX_INCLUDED) break;
-      if (s.included) datas.push(s.data);
-    }
+    for (const s of this.sessions) if (s.included) datas.push(s.data);
     return mergeData(datas);
   }
 
@@ -150,11 +144,5 @@ export class SessionStore {
   }
   currentSummary(): SessionSummary | null {
     return this.cur && this.cur.data.frames > 0 ? summarize(this.cur.data) : null;
-  }
-
-  /** Previous completed run (for loop feedback / trend), newest saved & included. */
-  prevRef(): { discipline: DisciplineId; m: SnapshotMetrics } | null {
-    const s = this.sessions.find((x) => x.included) ?? this.sessions[0];
-    return s ? { discipline: s.discipline, m: s.m } : null;
   }
 }

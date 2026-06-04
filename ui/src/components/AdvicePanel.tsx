@@ -80,7 +80,6 @@ function Card({ a }: { a: Advice }) {
         <p className="advice-rec">{a.recommendation}</p>
         {a.viz && <Viz v={a.viz} />}
       </div>
-      {a.trend && <div className="advice-trend">{a.trend}</div>}
       <div className="advice-section">
         <span className="advice-tag">Why — your data</span>
         <p className="advice-body">{a.why}</p>
