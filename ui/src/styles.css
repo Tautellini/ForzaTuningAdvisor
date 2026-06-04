@@ -2132,3 +2132,49 @@ body {
     position: static;
   }
 }
+
+/* ---- attach sticky bar flush to menu + landscape car ---- */
+.layout {
+  padding: 0 18px 18px;
+}
+.stickybar {
+  margin: 0 -18px 14px;
+  padding: 8px 18px 10px;
+  align-items: center;
+}
+.carstrip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+.cs-readouts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 64px;
+}
+.cs-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cs-gear {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+}
+.cs-speed {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.car-svg-h {
+  height: 116px;
+  width: auto;
+  display: block;
+}

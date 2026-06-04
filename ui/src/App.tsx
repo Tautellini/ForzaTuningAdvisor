@@ -14,7 +14,7 @@ import { ConnectionBar } from "./components/ConnectionBar";
 import { SessionStrip } from "./components/SessionStrip";
 import { ModeSelector } from "./components/ModeSelector";
 import { SettingsBar } from "./components/SettingsBar";
-import { LiveMini } from "./components/LiveMini";
+import { CarStrip } from "./components/CarStrip";
 import { PowerCurveChart } from "./components/PowerCurveChart";
 import { TractionBrakes } from "./components/TractionBrakes";
 import { Coverage } from "./components/Coverage";
@@ -81,7 +81,7 @@ export default function App() {
         ) : (
           <div className="content-wrap">
             <div className="stickybar">
-              <LiveMini t={latest} units={units} driving={driving} />
+              <CarStrip t={latest} units={units} driving={driving} />
               <div className="stickybar-sessions">
                 <SessionStrip
                   store={store}
