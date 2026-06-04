@@ -686,39 +686,6 @@ export function analyzeSession(
     }
   }
 
-  // ---- Opportunity: grip headroom, steered by your top priority -------------
-  if (p.rules.opportunity && s.corneringFrames >= 60 && s.nearLimitFrac < 0.25) {
-    const top = priorities[0];
-    let rec = "";
-    let outcome = "";
-    if (top === "topSpeed") {
-      rec = "Trade some grip for speed — reduce downforce and/or take taller gears.";
-      outcome = "More straight-line speed. Trade-off: you'll run closer to the limit in corners.";
-    } else if (top === "lapTime" || top === "agility") {
-      rec = "There's lap time on the table — push harder into corners, or make the setup more aggressive (stiffer, less wing, freer diff).";
-      outcome = "Faster entry and mid-corner. Trade-off: demands more precision from you.";
-    } else if (top === "tireLife") {
-      rec = "You're easy on the tires — good for long stints; no change needed for tire life.";
-      outcome = "Consistent pace over a stint. (Informational.)";
-    } else if (top === "fun") {
-      rec = "Lots of grip in reserve — soften the rear or loosen the diff to make it more playful.";
-      outcome = "More slidey and fun. Trade-off: slightly less outright grip.";
-    } else {
-      rec = "You're driving with margin — good for stability. You can safely push closer to the limit before changing the car.";
-      outcome = "More consistency now; pace is there when you want it. (Informational.)";
-    }
-    out.push({
-      id: "opportunity-headroom",
-      area: "Opportunity — grip headroom",
-      confidence: "low",
-      kind: "opportunity",
-      recommendation: rec,
-      why: `You reach the grip limit in only ${pct(s.nearLimitFrac)} of corners (peak ${r1(s.maxLatG)}g) — the tires have more to give than you're using.`,
-      outcome,
-      viz: { kind: "bar", value: s.nearLimitFrac, tone: "good" },
-    });
-  }
-
   // ---- Tire temperature window (proxy, no pressure data) -------------------
   if (p.rules.tireTemp) {
     const hot = (["fl", "fr", "rl", "rr"] as const).filter((k) => s.tireTempAvg[k] >= p.thr.hotTire);

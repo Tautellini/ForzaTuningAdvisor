@@ -270,8 +270,6 @@ interface PanelProps {
 }
 
 export function AdvicePanel({ advice, enoughData, summary, tune, units, drivetrain }: PanelProps) {
-  const general = advice.filter((a) => (a.group ?? "general") === "general");
-
   return (
     <section className="advice">
       <div className="advice-titlebar">
@@ -335,22 +333,7 @@ export function AdvicePanel({ advice, enoughData, summary, tune, units, drivetra
             </div>
           );
         })}
-
-        {general.length > 0 && (
-          <div className="advgroup">
-            <div className="advgroup-head">
-              <span className="advgroup-icon">✨</span>
-              <span className="advgroup-title">General</span>
-            </div>
-            <ul className="advgroup-list">
-              {general.map((a) => (
-                <AdviceCard key={a.id} a={a} />
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
-
     </section>
   );
 }
