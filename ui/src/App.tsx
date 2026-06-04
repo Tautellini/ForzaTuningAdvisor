@@ -14,7 +14,7 @@ import { ConnectionBar } from "./components/ConnectionBar";
 import { SessionStrip } from "./components/SessionStrip";
 import { ModeSelector } from "./components/ModeSelector";
 import { SettingsBar } from "./components/SettingsBar";
-import { LivePanel } from "./components/LivePanel";
+import { LiveMini } from "./components/LiveMini";
 import { PowerCurveChart } from "./components/PowerCurveChart";
 import { TractionBrakes } from "./components/TractionBrakes";
 import { Coverage } from "./components/Coverage";
@@ -80,22 +80,26 @@ export default function App() {
           <Waiting message="Connected to the bridge — waiting for the first packet…" />
         ) : (
           <div className="content-wrap">
-            <LivePanel t={latest} units={units} />
+            <div className="stickybar">
+              <LiveMini t={latest} units={units} driving={driving} />
+              <div className="stickybar-sessions">
+                <SessionStrip
+                  store={store}
+                  recording={store.recording}
+                  currentSamples={store.currentSamples}
+                  onEnd={tel.endCurrent}
+                  onDiscard={tel.discardCurrent}
+                  onToggle={tel.toggleInclude}
+                  onDelete={tel.deleteSession}
+                  onClear={tel.clearAll}
+                />
+              </div>
+            </div>
             <TunePanel
               tune={tune}
               units={units}
               drivetrain={lastCar?.drivetrain ?? (driving ? latest.car.drivetrain : undefined)}
               onChange={setTune}
-            />
-            <SessionStrip
-              store={store}
-              recording={store.recording}
-              currentSamples={store.currentSamples}
-              onEnd={tel.endCurrent}
-              onDiscard={tel.discardCurrent}
-              onToggle={tel.toggleInclude}
-              onDelete={tel.deleteSession}
-              onClear={tel.clearAll}
             />
             <div className="topcontrols">
               <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />

@@ -2028,3 +2028,107 @@ body {
   color: var(--muted);
   font-weight: 400;
 }
+
+/* ---- sticky sessions bar (with compact live readout) ---- */
+.stickybar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  margin-bottom: 14px;
+}
+.stickybar-sessions {
+  flex: 1;
+  min-width: 0;
+}
+.stickybar .sessionstrip {
+  margin-bottom: 0;
+  height: 100%;
+}
+
+.livemini {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.lm-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.lm-dot.on {
+  background: var(--green);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.lm-gear {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  min-width: 24px;
+  text-align: center;
+}
+.lm-speed {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.lm-unit {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 2px;
+}
+.lm-rpm {
+  width: 70px;
+  height: 8px;
+  background: var(--panel-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.lm-rpm-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green), var(--amber));
+}
+.lm-rpm-fill.red {
+  background: var(--red);
+}
+.lm-pedals {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+}
+.lm-ped {
+  width: 7px;
+  height: 26px;
+  background: var(--panel-2);
+  border-radius: 3px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+.lm-ped-fill {
+  width: 100%;
+}
+.lm-ped-fill.g {
+  background: var(--green);
+}
+.lm-ped-fill.r {
+  background: var(--red);
+}
+@media (max-width: 720px) {
+  .stickybar {
+    flex-direction: column;
+    position: static;
+  }
+}
