@@ -144,6 +144,45 @@ body {
   }
 }
 
+/* ---- mode selector ---- */
+.modebar {
+  margin-bottom: 14px;
+}
+.modetabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px;
+}
+.modetab {
+  flex: 1;
+  min-width: 88px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.12s, color 0.12s;
+}
+.modetab:hover {
+  color: var(--text);
+}
+.modetab.active {
+  background: var(--accent);
+  color: #04101f;
+}
+.mode-blurb {
+  margin: 8px 4px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* ---- session bar ---- */
 .sessionbar {
   display: flex;

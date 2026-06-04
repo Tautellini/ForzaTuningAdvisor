@@ -2,8 +2,15 @@ import { useMemo, useState } from "react";
 import { useTelemetry } from "./useTelemetry";
 import { analyzeSession } from "./advice/engine";
 import { loadTune, type CurrentTune } from "./tune";
+import {
+  DISCIPLINE_BY_ID,
+  loadDiscipline,
+  saveDiscipline,
+  type DisciplineId,
+} from "./discipline";
 import { ConnectionBar } from "./components/ConnectionBar";
 import { SessionBar } from "./components/SessionBar";
+import { ModeSelector } from "./components/ModeSelector";
 import { Dashboard } from "./components/Dashboard";
 import { AdvicePanel } from "./components/AdvicePanel";
 import { TunePanel } from "./components/TunePanel";
@@ -14,8 +21,15 @@ const URL_KEY = "fta.bridgeUrl";
 export default function App() {
   const [url, setUrl] = useState(() => localStorage.getItem(URL_KEY) ?? DEFAULT_URL);
   const [tune, setTune] = useState<CurrentTune>(() => loadTune());
+  const [discipline, setDiscipline] = useState<DisciplineId>(() => loadDiscipline());
   const { conn, latest, driving, hz, summary, reset } = useTelemetry(url);
-  const advice = useMemo(() => analyzeSession(summary, tune), [summary, tune]);
+  const profile = DISCIPLINE_BY_ID[discipline];
+  const advice = useMemo(() => analyzeSession(summary, tune, profile), [summary, tune, profile]);
+
+  const changeDiscipline = (id: DisciplineId) => {
+    setDiscipline(id);
+    saveDiscipline(id);
+  };
 
   const changeUrl = (u: string) => {
     setUrl(u);
@@ -37,6 +51,7 @@ export default function App() {
           <Waiting message="Connected. Jump into a drive in Forza and your data will show up here." />
         ) : (
           <div className="content-wrap">
+            <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
             <SessionBar summary={summary} onReset={reset} />
             <div className="content">
               <div className="left-col">

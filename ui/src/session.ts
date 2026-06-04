@@ -35,6 +35,8 @@ export interface SessionSummary {
   bottoming: Record<"front" | "rear", number>;
   topping: Record<"front" | "rear", number>;
   understeerRatio: number; // front slip angle / rear slip angle in corners (>1 understeer)
+  avgFrontSlipAngle: number; // mean |front slip angle| in corners (rad)
+  avgRearSlipAngle: number; // mean |rear slip angle| in corners (rad)
   corneringFrames: number;
   brakingFrames: number;
   powerFrames: number;
@@ -233,6 +235,8 @@ export class SessionAggregator {
       bottoming: { front: this.bottom.front / f, rear: this.bottom.rear / f },
       topping: { front: this.top.front / f, rear: this.top.rear / f },
       understeerRatio: this.rearSASum > 0.001 ? this.frontSASum / this.rearSASum : 1,
+      avgFrontSlipAngle: this.corneringFrames > 0 ? this.frontSASum / this.corneringFrames : 0,
+      avgRearSlipAngle: this.corneringFrames > 0 ? this.rearSASum / this.corneringFrames : 0,
       corneringFrames: this.corneringFrames,
       brakingFrames: this.brakingFrames,
       powerFrames: this.powerFrames,
