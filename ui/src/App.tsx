@@ -23,8 +23,15 @@ import { PriorityBar } from "./components/PriorityBar";
 const DEFAULT_URL = "ws://127.0.0.1:5301";
 const URL_KEY = "fta.bridgeUrl";
 
+function loadUrl(): string {
+  const saved = localStorage.getItem(URL_KEY);
+  if (saved && /^wss?:\/\/.+/.test(saved)) return saved;
+  localStorage.removeItem(URL_KEY); // drop any corrupt value
+  return DEFAULT_URL;
+}
+
 export default function App() {
-  const [url, setUrl] = useState(() => localStorage.getItem(URL_KEY) ?? DEFAULT_URL);
+  const [url, setUrl] = useState(loadUrl);
   const [tune, setTune] = useState<CurrentTune>(() => loadTune());
   const [discipline, setDiscipline] = useState<DisciplineId>(() => loadDiscipline());
   const [priorities, setPriorities] = useState<PriorityId[]>(() => loadPriorities());
