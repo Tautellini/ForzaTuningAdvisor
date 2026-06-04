@@ -430,16 +430,20 @@ export function analyzeSession(
           "More high-speed grip and stability through fast corners. Trade-off: more drag, so a little less top speed.",
         viz: { kind: "dir", dir: "more", label: "downforce" },
       });
-    } else if (s.highSpeedNearLimitFrac < 0.2 && topIs("topSpeed")) {
+    } else if (s.highSpeedNearLimitFrac < 0.25) {
+      // Grip headroom at speed = unused downforce you can trade for top speed.
+      const speedFirst = topIs("topSpeed") || topIs("lapTime");
       out.push({
         id: "aero-reduce",
         area: "Aero",
         confidence: "low",
         kind: "opportunity",
-        recommendation: "Reduce downforce (less wing) toward your top-speed priority.",
-        why: `You only reach the grip limit in ${pct(s.highSpeedNearLimitFrac)} of fast corners — there's aero grip you're not using, and wing is costing you drag.`,
+        recommendation: speedFirst
+          ? "Reduce downforce for more top speed — you've got grip to spare in fast corners."
+          : "Trade some downforce for top speed — you've got grip to spare in fast corners.",
+        why: `You only reach the grip limit in ${pct(s.highSpeedNearLimitFrac)} of fast corners (peak ${r1(s.maxLatG)}g) — that's aero grip you're not using, and the wing is costing you drag.`,
         outcome:
-          "Higher top speed and better straight-line lap time. Trade-off: less margin in fast corners — back it off gradually.",
+          "Higher top speed and better straight-line lap time. Trade-off: less margin in fast corners — back it off gradually and re-check.",
         viz: { kind: "dir", dir: "less", label: "downforce" },
       });
     }
