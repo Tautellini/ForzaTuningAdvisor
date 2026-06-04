@@ -1,299 +1,346 @@
 import type { CornerKey, Telemetry } from "./types";
 
-// Accumulates bounded running statistics over a whole driving session, updated
-// once per frame. Memory stays constant regardless of session length (we keep
-// aggregates and binned curves, never the full frame stream).
+// Session data is a plain, serializable, MERGEABLE bag of running statistics.
+// One per recorded session; multiple can be merged for a combined calculation.
 
-const RPM_BIN = 250; // power/torque curve resolution
+const RPM_BIN = 250;
+const CORNERS: CornerKey[] = ["fl", "fr", "rl", "rr"];
 
 interface GearStat {
-  ratioSum: number; // sum of (rpm / speed) in steady cruise -> avg = gear ratio proxy (k)
+  ratioSum: number;
   ratioCount: number;
-  wot: number; // full-throttle frames in this gear
-  limiter: number; // full-throttle frames on the rev limiter in this gear
-  maxSpeed: number; // m/s
+  wot: number;
+  limiter: number;
+  maxSpeed: number;
   frames: number;
+}
+
+export interface SessionData {
+  frames: number;
+  firstT: number;
+  lastT: number;
+  car: Telemetry["car"] | null;
+  maxSpeed: number;
+  maxRpm: number;
+  redline: number;
+  power: Record<number, { power: number; torque: number }>;
+  gears: Record<number, GearStat>;
+  powerFrames: number;
+  spinFrames: number;
+  frontSpin: number;
+  rearSpin: number;
+  brakingFrames: number;
+  frontLock: number;
+  rearLock: number;
+  corneringFrames: number;
+  frontSASum: number;
+  rearSASum: number;
+  maxLatG: number;
+  nearLimit: number;
+  hsCorner: number;
+  hsNearLimit: number;
+  hsFrontSA: number;
+  hsRearSA: number;
+  bottomFront: number;
+  bottomRear: number;
+  topFront: number;
+  topRear: number;
+  tempSum: Record<CornerKey, number>;
+  tempMax: Record<CornerKey, number>;
 }
 
 export interface SessionSummary {
   drivingFrames: number;
   durationS: number;
   car: Telemetry["car"];
-  maxSpeed: number; // km/h
+  maxSpeed: number;
   maxRpm: number;
-  // power curve (per rpm bin: best power W and torque Nm seen)
   powerCurve: { rpm: number; power: number; torque: number }[];
   peakPowerRpm: number;
   peakTorqueRpm: number;
   redline: number;
   gears: Record<number, { k: number; wot: number; limiterFrac: number; maxSpeedKmh: number }>;
-  // event fractions (0..1)
   wheelspinFrac: number;
-  frontSpinFrac: number; // per-axle wheelspin (so AWD shows both)
+  frontSpinFrac: number;
   rearSpinFrac: number;
   drivenAxle: "front" | "rear" | "all";
   frontLockFrac: number;
   rearLockFrac: number;
   bottoming: Record<"front" | "rear", number>;
   topping: Record<"front" | "rear", number>;
-  understeerRatio: number; // front slip angle / rear slip angle in corners (>1 understeer)
-  avgFrontSlipAngle: number; // mean |front slip angle| in corners (rad)
-  avgRearSlipAngle: number; // mean |rear slip angle| in corners (rad)
+  understeerRatio: number;
+  avgFrontSlipAngle: number;
+  avgRearSlipAngle: number;
   corneringFrames: number;
-  maxLatG: number; // peak lateral g seen
-  nearLimitFrac: number; // fraction of cornering frames at/over the grip limit
-  highSpeedCornerFrames: number; // cornering above ~108 km/h
-  highSpeedNearLimitFrac: number; // of those, fraction at the grip limit
-  highSpeedUndersteerRatio: number; // front/rear slip-angle ratio in fast corners
   brakingFrames: number;
   powerFrames: number;
+  maxLatG: number;
+  nearLimitFrac: number;
+  highSpeedCornerFrames: number;
+  highSpeedNearLimitFrac: number;
+  highSpeedUndersteerRatio: number;
   tireTempAvg: Record<CornerKey, number>;
   tireTempMax: Record<CornerKey, number>;
 }
 
-const CORNERS: CornerKey[] = ["fl", "fr", "rl", "rr"];
+export function emptyData(): SessionData {
+  return {
+    frames: 0,
+    firstT: 0,
+    lastT: 0,
+    car: null,
+    maxSpeed: 0,
+    maxRpm: 0,
+    redline: 0,
+    power: {},
+    gears: {},
+    powerFrames: 0,
+    spinFrames: 0,
+    frontSpin: 0,
+    rearSpin: 0,
+    brakingFrames: 0,
+    frontLock: 0,
+    rearLock: 0,
+    corneringFrames: 0,
+    frontSASum: 0,
+    rearSASum: 0,
+    maxLatG: 0,
+    nearLimit: 0,
+    hsCorner: 0,
+    hsNearLimit: 0,
+    hsFrontSA: 0,
+    hsRearSA: 0,
+    bottomFront: 0,
+    bottomRear: 0,
+    topFront: 0,
+    topRear: 0,
+    tempSum: { fl: 0, fr: 0, rl: 0, rr: 0 },
+    tempMax: { fl: 0, fr: 0, rl: 0, rr: 0 },
+  };
+}
 
-export class SessionAggregator {
-  private frames = 0;
-  private firstT = 0;
-  private lastT = 0;
-  private car: Telemetry["car"] | null = null;
-  private maxSpeed = 0;
-  private maxRpm = 0;
-  private redline = 0;
+function drivenKeys(dt: number): CornerKey[] {
+  if (dt === 0) return ["fl", "fr"];
+  if (dt === 1) return ["rl", "rr"];
+  return CORNERS;
+}
 
-  private power = new Map<number, { power: number; torque: number }>();
-  private gears = new Map<number, GearStat>();
+/** Accumulate one driving frame into a SessionData (mutates). Ignores idle frames. */
+export function addFrame(d: SessionData, f: Telemetry): void {
+  if (f.raceOn !== 1) return;
+  if (d.frames === 0) d.firstT = f.t;
+  d.lastT = f.t;
+  d.frames++;
+  d.car = f.car;
+  d.maxSpeed = Math.max(d.maxSpeed, f.speed);
+  d.maxRpm = Math.max(d.maxRpm, f.rpm.cur);
+  d.redline = Math.max(d.redline, f.rpm.max);
 
-  private powerFrames = 0;
-  private spinFrames = 0;
-  private frontSpin = 0;
-  private rearSpin = 0;
-  private brakingFrames = 0;
-  private frontLock = 0;
-  private rearLock = 0;
-  private corneringFrames = 0;
-  private frontSASum = 0;
-  private rearSASum = 0;
-  private maxLatG = 0;
-  private nearLimit = 0;
-  private hsCorner = 0;
-  private hsNearLimit = 0;
-  private hsFrontSA = 0;
-  private hsRearSA = 0;
-  private bottom = { front: 0, rear: 0 };
-  private top = { front: 0, rear: 0 };
-  private tempSum: Record<CornerKey, number> = { fl: 0, fr: 0, rl: 0, rr: 0 };
-  private tempMax: Record<CornerKey, number> = { fl: 0, fr: 0, rl: 0, rr: 0 };
-
-  reset() {
-    this.frames = 0;
-    this.firstT = 0;
-    this.lastT = 0;
-    this.car = null;
-    this.maxSpeed = 0;
-    this.maxRpm = 0;
-    this.redline = 0;
-    this.power.clear();
-    this.gears.clear();
-    this.powerFrames = 0;
-    this.spinFrames = 0;
-    this.frontSpin = 0;
-    this.rearSpin = 0;
-    this.brakingFrames = 0;
-    this.frontLock = 0;
-    this.rearLock = 0;
-    this.corneringFrames = 0;
-    this.frontSASum = 0;
-    this.rearSASum = 0;
-    this.maxLatG = 0;
-    this.nearLimit = 0;
-    this.hsCorner = 0;
-    this.hsNearLimit = 0;
-    this.hsFrontSA = 0;
-    this.hsRearSA = 0;
-    this.bottom = { front: 0, rear: 0 };
-    this.top = { front: 0, rear: 0 };
-    this.tempSum = { fl: 0, fr: 0, rl: 0, rr: 0 };
-    this.tempMax = { fl: 0, fr: 0, rl: 0, rr: 0 };
+  if (f.rpm.cur > 500 && f.throttle > 0.95) {
+    const bin = Math.round(f.rpm.cur / RPM_BIN) * RPM_BIN;
+    const prev = d.power[bin];
+    if (!prev || f.power > prev.power) d.power[bin] = { power: f.power, torque: f.torque };
   }
 
-  get count() {
-    return this.frames;
+  if (f.gear > 0 && f.gear < 11) {
+    let g = d.gears[f.gear];
+    if (!g) {
+      g = { ratioSum: 0, ratioCount: 0, wot: 0, limiter: 0, maxSpeed: 0, frames: 0 };
+      d.gears[f.gear] = g;
+    }
+    g.frames++;
+    g.maxSpeed = Math.max(g.maxSpeed, f.speed);
+    if (f.speed > 8 && f.throttle > 0.2 && f.brake < 0.05) {
+      g.ratioSum += f.rpm.cur / f.speed;
+      g.ratioCount++;
+    }
+    if (f.throttle > 0.9 && f.speed > 5) {
+      g.wot++;
+      if (f.rpm.max > 0 && f.rpm.cur >= 0.985 * f.rpm.max) g.limiter++;
+    }
   }
 
-  private drivenKeys(): CornerKey[] {
-    const dt = this.car?.drivetrain ?? 2;
-    if (dt === 0) return ["fl", "fr"];
-    if (dt === 1) return ["rl", "rr"];
-    return CORNERS;
+  if (f.throttle >= 0.6 && f.speed > 4) {
+    d.powerFrames++;
+    const driven = drivenKeys(f.car.drivetrain);
+    const slip = driven.reduce((a, k) => a + Math.abs(f.tires[k].slipRatio), 0) / driven.length;
+    if (slip >= 0.18) d.spinFrames++;
+    const fSlip = (Math.abs(f.tires.fl.slipRatio) + Math.abs(f.tires.fr.slipRatio)) / 2;
+    const rSlip = (Math.abs(f.tires.rl.slipRatio) + Math.abs(f.tires.rr.slipRatio)) / 2;
+    if (fSlip >= 0.18) d.frontSpin++;
+    if (rSlip >= 0.18) d.rearSpin++;
   }
 
-  add(f: Telemetry) {
-    if (f.raceOn !== 1) return;
-    if (this.frames === 0) this.firstT = f.t;
-    this.lastT = f.t;
-    this.frames++;
-    this.car = f.car;
-    this.maxSpeed = Math.max(this.maxSpeed, f.speed);
-    this.maxRpm = Math.max(this.maxRpm, f.rpm.cur);
-    this.redline = Math.max(this.redline, f.rpm.max);
+  if (f.brake >= 0.55 && f.speed > 8) {
+    d.brakingFrames++;
+    const fl = (-f.tires.fl.slipRatio - f.tires.fr.slipRatio) / 2;
+    const rl = (-f.tires.rl.slipRatio - f.tires.rr.slipRatio) / 2;
+    if (fl >= 0.18) d.frontLock++;
+    if (rl >= 0.18) d.rearLock++;
+  }
 
-    // power / torque curve
-    if (f.rpm.cur > 500 && f.throttle > 0.95) {
-      const bin = Math.round(f.rpm.cur / RPM_BIN) * RPM_BIN;
-      const prev = this.power.get(bin);
-      if (!prev || f.power > prev.power) this.power.set(bin, { power: f.power, torque: f.torque });
+  d.maxLatG = Math.max(d.maxLatG, Math.abs(f.accel.x) / 9.81);
+
+  if (Math.abs(f.steer) >= 0.25 && f.speed > 12) {
+    d.corneringFrames++;
+    const frontSA = (Math.abs(f.tires.fl.slipAngle) + Math.abs(f.tires.fr.slipAngle)) / 2;
+    const rearSA = (Math.abs(f.tires.rl.slipAngle) + Math.abs(f.tires.rr.slipAngle)) / 2;
+    d.frontSASum += frontSA;
+    d.rearSASum += rearSA;
+    const maxCombined = Math.max(
+      f.tires.fl.combinedSlip,
+      f.tires.fr.combinedSlip,
+      f.tires.rl.combinedSlip,
+      f.tires.rr.combinedSlip,
+    );
+    if (maxCombined >= 0.9) d.nearLimit++;
+    if (f.speed >= 30) {
+      d.hsCorner++;
+      if (maxCombined >= 0.9) d.hsNearLimit++;
+      d.hsFrontSA += frontSA;
+      d.hsRearSA += rearSA;
     }
+  }
 
-    // per-gear stats
-    if (f.gear > 0 && f.gear < 11) {
-      let g = this.gears.get(f.gear);
-      if (!g) {
-        g = { ratioSum: 0, ratioCount: 0, wot: 0, limiter: 0, maxSpeed: 0, frames: 0 };
-        this.gears.set(f.gear, g);
-      }
-      g.frames++;
-      g.maxSpeed = Math.max(g.maxSpeed, f.speed);
-      // steady cruise sample for ratio (rpm per m/s)
-      if (f.speed > 8 && f.throttle > 0.2 && f.brake < 0.05) {
-        g.ratioSum += f.rpm.cur / f.speed;
-        g.ratioCount++;
-      }
-      if (f.throttle > 0.9 && f.speed > 5) {
-        g.wot++;
-        if (f.rpm.max > 0 && f.rpm.cur >= 0.985 * f.rpm.max) g.limiter++;
-      }
+  if (f.tires.fl.suspNorm >= 0.97 || f.tires.fr.suspNorm >= 0.97) d.bottomFront++;
+  if (f.tires.rl.suspNorm >= 0.97 || f.tires.rr.suspNorm >= 0.97) d.bottomRear++;
+  if (f.tires.fl.suspNorm <= 0.03 || f.tires.fr.suspNorm <= 0.03) d.topFront++;
+  if (f.tires.rl.suspNorm <= 0.03 || f.tires.rr.suspNorm <= 0.03) d.topRear++;
+
+  for (const k of CORNERS) {
+    d.tempSum[k] += f.tires[k].temp;
+    d.tempMax[k] = Math.max(d.tempMax[k], f.tires[k].temp);
+  }
+}
+
+/** Merge several SessionData into one combined bag. */
+export function mergeData(ds: SessionData[]): SessionData {
+  const out = emptyData();
+  let firstSet = false;
+  for (const d of ds) {
+    if (d.frames === 0) continue;
+    if (!firstSet) {
+      out.firstT = d.firstT;
+      firstSet = true;
     }
-
-    // wheelspin (driven axle + per axle)
-    if (f.throttle >= 0.6 && f.speed > 4) {
-      this.powerFrames++;
-      const driven = this.drivenKeys();
-      const slip = driven.reduce((a, k) => a + Math.abs(f.tires[k].slipRatio), 0) / driven.length;
-      if (slip >= 0.18) this.spinFrames++;
-      const fSlip = (Math.abs(f.tires.fl.slipRatio) + Math.abs(f.tires.fr.slipRatio)) / 2;
-      const rSlip = (Math.abs(f.tires.rl.slipRatio) + Math.abs(f.tires.rr.slipRatio)) / 2;
-      if (fSlip >= 0.18) this.frontSpin++;
-      if (rSlip >= 0.18) this.rearSpin++;
-    }
-
-    // braking lockup
-    if (f.brake >= 0.55 && f.speed > 8) {
-      this.brakingFrames++;
-      const fl = (-f.tires.fl.slipRatio - f.tires.fr.slipRatio) / 2;
-      const rl = (-f.tires.rl.slipRatio - f.tires.rr.slipRatio) / 2;
-      if (fl >= 0.18) this.frontLock++;
-      if (rl >= 0.18) this.rearLock++;
-    }
-
-    // lateral g (any frame)
-    this.maxLatG = Math.max(this.maxLatG, Math.abs(f.accel.x) / 9.81);
-
-    // cornering balance (slip angles) + grip-limit usage
-    if (Math.abs(f.steer) >= 0.25 && f.speed > 12) {
-      this.corneringFrames++;
-      const frontSA = (Math.abs(f.tires.fl.slipAngle) + Math.abs(f.tires.fr.slipAngle)) / 2;
-      const rearSA = (Math.abs(f.tires.rl.slipAngle) + Math.abs(f.tires.rr.slipAngle)) / 2;
-      this.frontSASum += frontSA;
-      this.rearSASum += rearSA;
-      const maxCombined = Math.max(
-        f.tires.fl.combinedSlip,
-        f.tires.fr.combinedSlip,
-        f.tires.rl.combinedSlip,
-        f.tires.rr.combinedSlip,
-      );
-      if (maxCombined >= 0.9) this.nearLimit++;
-      if (f.speed >= 30) {
-        this.hsCorner++;
-        if (maxCombined >= 0.9) this.hsNearLimit++;
-        this.hsFrontSA += frontSA;
-        this.hsRearSA += rearSA;
-      }
-    }
-
-    // suspension extremes
-    if (f.tires.fl.suspNorm >= 0.97 || f.tires.fr.suspNorm >= 0.97) this.bottom.front++;
-    if (f.tires.rl.suspNorm >= 0.97 || f.tires.rr.suspNorm >= 0.97) this.bottom.rear++;
-    if (f.tires.fl.suspNorm <= 0.03 || f.tires.fr.suspNorm <= 0.03) this.top.front++;
-    if (f.tires.rl.suspNorm <= 0.03 || f.tires.rr.suspNorm <= 0.03) this.top.rear++;
-
-    // tire temps
+    out.lastT = Math.max(out.lastT, d.lastT);
+    out.frames += d.frames;
+    if (d.car) out.car = d.car;
+    out.maxSpeed = Math.max(out.maxSpeed, d.maxSpeed);
+    out.maxRpm = Math.max(out.maxRpm, d.maxRpm);
+    out.redline = Math.max(out.redline, d.redline);
+    out.powerFrames += d.powerFrames;
+    out.spinFrames += d.spinFrames;
+    out.frontSpin += d.frontSpin;
+    out.rearSpin += d.rearSpin;
+    out.brakingFrames += d.brakingFrames;
+    out.frontLock += d.frontLock;
+    out.rearLock += d.rearLock;
+    out.corneringFrames += d.corneringFrames;
+    out.frontSASum += d.frontSASum;
+    out.rearSASum += d.rearSASum;
+    out.maxLatG = Math.max(out.maxLatG, d.maxLatG);
+    out.nearLimit += d.nearLimit;
+    out.hsCorner += d.hsCorner;
+    out.hsNearLimit += d.hsNearLimit;
+    out.hsFrontSA += d.hsFrontSA;
+    out.hsRearSA += d.hsRearSA;
+    out.bottomFront += d.bottomFront;
+    out.bottomRear += d.bottomRear;
+    out.topFront += d.topFront;
+    out.topRear += d.topRear;
     for (const k of CORNERS) {
-      this.tempSum[k] += f.tires[k].temp;
-      this.tempMax[k] = Math.max(this.tempMax[k], f.tires[k].temp);
+      out.tempSum[k] += d.tempSum[k];
+      out.tempMax[k] = Math.max(out.tempMax[k], d.tempMax[k]);
+    }
+    for (const [binStr, v] of Object.entries(d.power)) {
+      const bin = Number(binStr);
+      const prev = out.power[bin];
+      if (!prev || v.power > prev.power) out.power[bin] = { ...v };
+    }
+    for (const [gStr, g] of Object.entries(d.gears)) {
+      const gn = Number(gStr);
+      const cur = out.gears[gn] ?? { ratioSum: 0, ratioCount: 0, wot: 0, limiter: 0, maxSpeed: 0, frames: 0 };
+      cur.ratioSum += g.ratioSum;
+      cur.ratioCount += g.ratioCount;
+      cur.wot += g.wot;
+      cur.limiter += g.limiter;
+      cur.frames += g.frames;
+      cur.maxSpeed = Math.max(cur.maxSpeed, g.maxSpeed);
+      out.gears[gn] = cur;
+    }
+  }
+  return out;
+}
+
+/** Compute a SessionSummary from a (possibly merged) SessionData. */
+export function summarize(d: SessionData): SessionSummary | null {
+  if (d.frames === 0 || !d.car) return null;
+  const f = d.frames;
+
+  const curve = Object.entries(d.power)
+    .map(([rpm, v]) => ({ rpm: Number(rpm), power: v.power, torque: v.torque }))
+    .sort((a, b) => a.rpm - b.rpm);
+  let peakPowerRpm = 0,
+    peakPower = 0,
+    peakTorqueRpm = 0,
+    peakTorque = 0;
+  for (const p of curve) {
+    if (p.power > peakPower) {
+      peakPower = p.power;
+      peakPowerRpm = p.rpm;
+    }
+    if (p.torque > peakTorque) {
+      peakTorque = p.torque;
+      peakTorqueRpm = p.rpm;
     }
   }
 
-  summary(): SessionSummary | null {
-    if (this.frames === 0 || !this.car) return null;
-    const f = this.frames;
-
-    const curve = [...this.power.entries()]
-      .map(([rpm, v]) => ({ rpm, power: v.power, torque: v.torque }))
-      .sort((a, b) => a.rpm - b.rpm);
-    let peakPowerRpm = 0,
-      peakPower = 0,
-      peakTorqueRpm = 0,
-      peakTorque = 0;
-    for (const p of curve) {
-      if (p.power > peakPower) {
-        peakPower = p.power;
-        peakPowerRpm = p.rpm;
-      }
-      if (p.torque > peakTorque) {
-        peakTorque = p.torque;
-        peakTorqueRpm = p.rpm;
-      }
-    }
-
-    const gears: SessionSummary["gears"] = {};
-    for (const [g, s] of this.gears) {
-      gears[g] = {
-        k: s.ratioCount > 0 ? s.ratioSum / s.ratioCount : 0,
-        wot: s.wot,
-        limiterFrac: s.wot > 0 ? s.limiter / s.wot : 0,
-        maxSpeedKmh: s.maxSpeed * 3.6,
-      };
-    }
-
-    const dt = this.car.drivetrain;
-    const drivenAxle = dt === 0 ? "front" : dt === 1 ? "rear" : "all";
-
-    const avg = (k: CornerKey) => this.tempSum[k] / f;
-
-    return {
-      drivingFrames: f,
-      durationS: Math.max(0, (this.lastT - this.firstT) / 1000),
-      car: this.car,
-      maxSpeed: this.maxSpeed * 3.6,
-      maxRpm: this.maxRpm,
-      powerCurve: curve,
-      peakPowerRpm,
-      peakTorqueRpm,
-      redline: this.redline,
-      gears,
-      wheelspinFrac: this.powerFrames > 0 ? this.spinFrames / this.powerFrames : 0,
-      frontSpinFrac: this.powerFrames > 0 ? this.frontSpin / this.powerFrames : 0,
-      rearSpinFrac: this.powerFrames > 0 ? this.rearSpin / this.powerFrames : 0,
-      drivenAxle,
-      frontLockFrac: this.brakingFrames > 0 ? this.frontLock / this.brakingFrames : 0,
-      rearLockFrac: this.brakingFrames > 0 ? this.rearLock / this.brakingFrames : 0,
-      bottoming: { front: this.bottom.front / f, rear: this.bottom.rear / f },
-      topping: { front: this.top.front / f, rear: this.top.rear / f },
-      understeerRatio: this.rearSASum > 0.001 ? this.frontSASum / this.rearSASum : 1,
-      avgFrontSlipAngle: this.corneringFrames > 0 ? this.frontSASum / this.corneringFrames : 0,
-      avgRearSlipAngle: this.corneringFrames > 0 ? this.rearSASum / this.corneringFrames : 0,
-      corneringFrames: this.corneringFrames,
-      maxLatG: this.maxLatG,
-      nearLimitFrac: this.corneringFrames > 0 ? this.nearLimit / this.corneringFrames : 0,
-      highSpeedCornerFrames: this.hsCorner,
-      highSpeedNearLimitFrac: this.hsCorner > 0 ? this.hsNearLimit / this.hsCorner : 0,
-      highSpeedUndersteerRatio: this.hsRearSA > 0.001 ? this.hsFrontSA / this.hsRearSA : 1,
-      brakingFrames: this.brakingFrames,
-      powerFrames: this.powerFrames,
-      tireTempAvg: { fl: avg("fl"), fr: avg("fr"), rl: avg("rl"), rr: avg("rr") },
-      tireTempMax: { ...this.tempMax },
+  const gears: SessionSummary["gears"] = {};
+  for (const [g, s] of Object.entries(d.gears)) {
+    gears[Number(g)] = {
+      k: s.ratioCount > 0 ? s.ratioSum / s.ratioCount : 0,
+      wot: s.wot,
+      limiterFrac: s.wot > 0 ? s.limiter / s.wot : 0,
+      maxSpeedKmh: s.maxSpeed * 3.6,
     };
   }
+
+  const dt = d.car.drivetrain;
+  const drivenAxle = dt === 0 ? "front" : dt === 1 ? "rear" : "all";
+  const avg = (k: CornerKey) => d.tempSum[k] / f;
+
+  return {
+    drivingFrames: f,
+    durationS: Math.max(0, (d.lastT - d.firstT) / 1000),
+    car: d.car,
+    maxSpeed: d.maxSpeed * 3.6,
+    maxRpm: d.maxRpm,
+    powerCurve: curve,
+    peakPowerRpm,
+    peakTorqueRpm,
+    redline: d.redline,
+    gears,
+    wheelspinFrac: d.powerFrames > 0 ? d.spinFrames / d.powerFrames : 0,
+    frontSpinFrac: d.powerFrames > 0 ? d.frontSpin / d.powerFrames : 0,
+    rearSpinFrac: d.powerFrames > 0 ? d.rearSpin / d.powerFrames : 0,
+    drivenAxle,
+    frontLockFrac: d.brakingFrames > 0 ? d.frontLock / d.brakingFrames : 0,
+    rearLockFrac: d.brakingFrames > 0 ? d.rearLock / d.brakingFrames : 0,
+    bottoming: { front: d.bottomFront / f, rear: d.bottomRear / f },
+    topping: { front: d.topFront / f, rear: d.topRear / f },
+    understeerRatio: d.rearSASum > 0.001 ? d.frontSASum / d.rearSASum : 1,
+    avgFrontSlipAngle: d.corneringFrames > 0 ? d.frontSASum / d.corneringFrames : 0,
+    avgRearSlipAngle: d.corneringFrames > 0 ? d.rearSASum / d.corneringFrames : 0,
+    corneringFrames: d.corneringFrames,
+    brakingFrames: d.brakingFrames,
+    powerFrames: d.powerFrames,
+    maxLatG: d.maxLatG,
+    nearLimitFrac: d.corneringFrames > 0 ? d.nearLimit / d.corneringFrames : 0,
+    highSpeedCornerFrames: d.hsCorner,
+    highSpeedNearLimitFrac: d.hsCorner > 0 ? d.hsNearLimit / d.hsCorner : 0,
+    highSpeedUndersteerRatio: d.hsRearSA > 0.001 ? d.hsFrontSA / d.hsRearSA : 1,
+    tireTempAvg: { fl: avg("fl"), fr: avg("fr"), rl: avg("rl"), rr: avg("rr") },
+    tireTempMax: { ...d.tempMax },
+  };
 }

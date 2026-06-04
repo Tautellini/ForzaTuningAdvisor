@@ -1285,3 +1285,154 @@ body {
 .tr-grip {
   width: 50px;
 }
+
+/* ---- session strip ---- */
+.sessionstrip {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.ss-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.ss-title {
+  font-weight: 700;
+}
+.ss-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.ss-list {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.ss-card {
+  flex: 0 0 auto;
+  width: 168px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+}
+.ss-card.included {
+  border-color: var(--accent);
+}
+.ss-card.live {
+  border-style: dashed;
+}
+.ss-card.live.idle {
+  opacity: 0.8;
+}
+.ss-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.ss-rec {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--red);
+}
+.ss-rec.idle {
+  color: var(--muted);
+}
+.rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.ss-samples {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ss-actions {
+  display: flex;
+  gap: 6px;
+}
+.ss-actions button {
+  flex: 1;
+  background: var(--accent);
+  color: #04101f;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ss-actions button.ghost {
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.ss-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ss-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ss-check.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ss-del {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+.ss-del:hover {
+  color: var(--red);
+}
+.ss-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 6px;
+}
+.ss-tags {
+  display: flex;
+  gap: 6px;
+}
+.ss-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg);
+}
+.ss-tag.understeer {
+  color: var(--accent);
+}
+.ss-tag.oversteer {
+  color: var(--red);
+}
+.ss-tag.neutral {
+  color: var(--green);
+}
+.trend-foot {
+  font-size: 11px;
+  margin-top: 8px;
+}

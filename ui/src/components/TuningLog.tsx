@@ -1,8 +1,7 @@
-import type { TuneSnapshot } from "../tuninglog";
+import type { RecordedSession } from "../sessions";
 
 interface Props {
-  log: TuneSnapshot[];
-  onClear: () => void;
+  sessions: RecordedSession[];
 }
 
 const W = 520;
@@ -10,46 +9,41 @@ const H = 90;
 const PAD = 10;
 
 function balanceY(ratio: number): number {
-  // log scale around 1.0; clamp to [0.5, 2]
   const v = Math.max(-1, Math.min(1, Math.log2(Math.max(ratio, 0.01))));
   return PAD + (1 - (v + 1) / 2) * (H - 2 * PAD);
 }
 
-export function TuningLog({ log, onClear }: Props) {
-  if (log.length === 0) {
+export function TuningLog({ sessions }: Props) {
+  // chronological (oldest -> newest)
+  const log = [...sessions].reverse();
+
+  if (log.length < 2) {
     return (
       <div className="viz-card">
         <div className="viz-head">
-          <h3>Tuning log &amp; trend</h3>
+          <h3>Balance &amp; grip trend</h3>
         </div>
         <div className="viz-empty">
-          Hit <b>Reset</b> after each tune change — it snapshots this run's balance &amp; grip so you
-          can see whether the change helped, and chart the trend.
+          Record at least two sessions (drive, change the car, drive again) to see how your changes
+          move the balance and grip.
         </div>
       </div>
     );
   }
 
   const n = log.length;
-  const x = (i: number) => (n === 1 ? W / 2 : PAD + (i / (n - 1)) * (W - 2 * PAD));
+  const x = (i: number) => PAD + (i / (n - 1)) * (W - 2 * PAD);
   const balPath = log
     .map((e, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${balanceY(e.m.understeerRatio).toFixed(1)}`)
     .join(" ");
 
-  const recent = [...log].slice(-6).reverse();
-  const fmtTime = (t: number) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const balText = (r: number) => (r >= 1.15 ? "understeer" : r <= 0.87 ? "oversteer" : "neutral");
-
   return (
     <div className="viz-card">
       <div className="viz-head">
-        <h3>Tuning log &amp; trend</h3>
-        <button className="link-btn" onClick={onClear}>
-          clear
-        </button>
+        <h3>Balance &amp; grip trend</h3>
+        <span className="viz-sub">across your recorded sessions →</span>
       </div>
-
-      <div className="trend-legend">Balance over your changes (top = oversteer, middle = neutral)</div>
+      <div className="trend-legend">Balance (top = oversteer · middle = neutral · bottom = understeer)</div>
       <svg className="trend-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
         <line x1={PAD} y1={balanceY(1)} x2={W - PAD} y2={balanceY(1)} className="trend-neutral" />
         <text x={W - PAD} y={balanceY(1) - 3} className="axis-label" textAnchor="end">
@@ -58,7 +52,7 @@ export function TuningLog({ log, onClear }: Props) {
         {balPath && <path d={balPath} className="trend-line" />}
         {log.map((e, i) => (
           <circle
-            key={i}
+            key={e.id}
             cx={x(i)}
             cy={balanceY(e.m.understeerRatio)}
             r={i === n - 1 ? 5 : 3}
@@ -72,22 +66,10 @@ export function TuningLog({ log, onClear }: Props) {
           />
         ))}
       </svg>
-
-      <ul className="trend-list">
-        {recent.map((e, i) => (
-          <li key={i} className="trend-row">
-            <span className="tr-time">{fmtTime(e.t)}</span>
-            <span className="tr-mode">{e.discipline}</span>
-            <span className={`tr-bal ${balText(e.m.understeerRatio)}`}>
-              {balText(e.m.understeerRatio)} {e.m.understeerRatio.toFixed(2)}
-            </span>
-            <span className="tr-grip">{e.m.maxLatG.toFixed(2)}g</span>
-            <span className="tr-extra muted">
-              {Math.round(e.m.frontSpinFrac * 100)}/{Math.round(e.m.rearSpinFrac * 100)}% spin F/R
-            </span>
-          </li>
-        ))}
-      </ul>
+      <div className="trend-foot muted">
+        Newest on the right (peak grip {Math.max(...log.map((e) => e.m.maxLatG)).toFixed(2)}g). Each
+        dot is one session.
+      </div>
     </div>
   );
 }

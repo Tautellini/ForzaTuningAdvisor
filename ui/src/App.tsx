@@ -9,9 +9,8 @@ import {
   type DisciplineId,
 } from "./discipline";
 import { loadPriorities, savePriorities, type PriorityId } from "./priorities";
-import { appendLog, clearLog, loadLog, metricsFrom, type TuneSnapshot } from "./tuninglog";
 import { ConnectionBar } from "./components/ConnectionBar";
-import { SessionBar } from "./components/SessionBar";
+import { SessionStrip } from "./components/SessionStrip";
 import { ModeSelector } from "./components/ModeSelector";
 import { LivePanel } from "./components/LivePanel";
 import { PowerCurveChart } from "./components/PowerCurveChart";
@@ -29,17 +28,17 @@ export default function App() {
   const [tune, setTune] = useState<CurrentTune>(() => loadTune());
   const [discipline, setDiscipline] = useState<DisciplineId>(() => loadDiscipline());
   const [priorities, setPriorities] = useState<PriorityId[]>(() => loadPriorities());
-  const [log, setLog] = useState<TuneSnapshot[]>(() => loadLog());
-  const { conn, latest, driving, hz, summary, recent, reset } = useTelemetry(url);
+
+  const tel = useTelemetry(url, discipline);
+  const { conn, latest, driving, hz, rev, store } = tel;
   const profile = DISCIPLINE_BY_ID[discipline];
 
-  // Advice reads the recent window once it has ~10s of data (reacts to tune
-  // changes mid-session), else falls back to the cumulative session.
-  const liveSummary = recent && recent.drivingFrames >= 600 ? recent : summary;
-  const prev = log.length > 0 ? log[log.length - 1] : null;
+  // Everything derived from the store recomputes when rev bumps (live + actions).
+  const computed = useMemo(() => store.computedSummary(), [store, rev]);
+  const prev = useMemo(() => store.prevRef(), [store, rev]);
   const advice = useMemo(
-    () => analyzeSession(liveSummary, tune, profile, priorities, prev),
-    [liveSummary, tune, profile, priorities, prev],
+    () => analyzeSession(computed, tune, profile, priorities, prev),
+    [computed, tune, profile, priorities, prev],
   );
 
   const changeUrl = (u: string) => {
@@ -54,23 +53,8 @@ export default function App() {
     setPriorities(p);
     savePriorities(p);
   };
-  const handleReset = () => {
-    if (summary && summary.drivingFrames > 120) {
-      setLog(
-        appendLog({
-          t: Date.now(),
-          durationS: summary.durationS,
-          samples: summary.drivingFrames,
-          discipline,
-          tune: { ...tune },
-          m: metricsFrom(summary),
-        }),
-      );
-    }
-    reset();
-  };
 
-  const enoughData = (liveSummary?.drivingFrames ?? 0) >= 120;
+  const enoughData = (computed?.drivingFrames ?? 0) >= 120;
 
   return (
     <div className="app">
@@ -80,19 +64,26 @@ export default function App() {
         {conn !== "open" ? (
           <SetupHelp url={url} />
         ) : !latest ? (
-          <Waiting message="Connected to the bridge — waiting for the first telemetry packet…" />
-        ) : !summary && !driving ? (
-          <Waiting message="Connected. Jump into a drive in Forza and your data will show up here." />
+          <Waiting message="Connected to the bridge — waiting for the first packet…" />
         ) : (
           <div className="content-wrap">
             <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
-            <SessionBar summary={summary} onReset={handleReset} />
-            {latest && <LivePanel t={latest} />}
+            <SessionStrip
+              store={store}
+              recording={store.recording}
+              currentSamples={store.currentSamples}
+              onEnd={tel.endCurrent}
+              onDiscard={tel.discardCurrent}
+              onToggle={tel.toggleInclude}
+              onDelete={tel.deleteSession}
+              onClear={tel.clearAll}
+            />
+            <LivePanel t={latest} />
             <div className="vizrow">
-              <PowerCurveChart summary={summary} liveRpm={latest?.rpm.cur ?? 0} />
-              <TractionBrakes summary={summary} tune={tune} />
+              <PowerCurveChart summary={computed} liveRpm={latest.rpm.cur} />
+              <TractionBrakes summary={computed} tune={tune} />
             </div>
-            <TuningLog log={log} onClear={() => setLog(clearLog())} />
+            <TuningLog sessions={store.sessions} />
             <TunePanel tune={tune} onChange={setTune} />
             <div className="advice-wrap">
               <PriorityBar priorities={priorities} onChange={changePriorities} />

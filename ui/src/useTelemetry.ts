@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Telemetry } from "./types";
-import { SessionAggregator, type SessionSummary } from "./session";
+import type { DisciplineId } from "./discipline";
+import { SessionStore } from "./sessions";
 
 export type ConnState = "connecting" | "open" | "closed";
 
@@ -9,39 +10,60 @@ export interface TelemetryState {
   latest: Telemetry | null;
   driving: boolean;
   hz: number;
-  /** Accumulated session statistics (since last reset), refreshed a few times/sec. */
-  summary: SessionSummary | null;
-  /** Recent-window statistics (~last 40s of driving) — reacts fast to tune changes. */
-  recent: SessionSummary | null;
-  /** Clear the accumulated session. */
-  reset: () => void;
+  /** Bumps whenever something the UI derives from the store may have changed. */
+  rev: number;
+  store: SessionStore;
+  endCurrent: () => void;
+  discardCurrent: () => void;
+  toggleInclude: (id: string) => void;
+  deleteSession: (id: string) => void;
+  clearAll: () => void;
 }
 
-const RECENT_MS = 40_000;
-
-export function useTelemetry(url: string): TelemetryState {
+export function useTelemetry(url: string, discipline: DisciplineId): TelemetryState {
   const [conn, setConn] = useState<ConnState>("connecting");
   const [latest, setLatest] = useState<Telemetry | null>(null);
   const [driving, setDriving] = useState(false);
   const [hz, setHz] = useState(0);
-  const [summary, setSummary] = useState<SessionSummary | null>(null);
-  const [recent, setRecent] = useState<SessionSummary | null>(null);
+  const [rev, setRev] = useState(0);
+  const bump = useCallback(() => setRev((r) => r + 1), []);
 
-  const agg = useRef(new SessionAggregator());
-  const recentBuf = useRef<Telemetry[]>([]);
+  const store = useRef(new SessionStore());
+  const disciplineRef = useRef(discipline);
+  disciplineRef.current = discipline;
   const frameCount = useRef(0);
 
-  const reset = useCallback(() => {
-    agg.current.reset();
-    recentBuf.current = [];
-    setSummary(null);
-    setRecent(null);
-  }, []);
+  const endCurrent = useCallback(() => {
+    store.current.endCurrent();
+    bump();
+  }, [bump]);
+  const discardCurrent = useCallback(() => {
+    store.current.discardCurrent();
+    bump();
+  }, [bump]);
+  const toggleInclude = useCallback(
+    (id: string) => {
+      store.current.toggleInclude(id);
+      bump();
+    },
+    [bump],
+  );
+  const deleteSession = useCallback(
+    (id: string) => {
+      store.current.remove(id);
+      bump();
+    },
+    [bump],
+  );
+  const clearAll = useCallback(() => {
+    store.current.clearAll();
+    bump();
+  }, [bump]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimer: number | undefined;
-    let snapTimer: number | undefined;
+    let tickTimer: number | undefined;
     let hzTimer: number | undefined;
     let closed = false;
 
@@ -59,17 +81,12 @@ export function useTelemetry(url: string): TelemetryState {
         frameCount.current++;
         setLatest(t);
         setDriving(t.raceOn === 1);
-        agg.current.add(t); // ignores idle frames internally
-        if (t.raceOn === 1) {
-          const buf = recentBuf.current;
-          buf.push(t);
-          const cutoff = t.t - RECENT_MS;
-          while (buf.length > 1 && buf[0].t < cutoff) buf.shift();
-        }
+        store.current.feed(t, disciplineRef.current);
       };
       ws.onclose = () => {
         setConn("closed");
         setDriving(false);
+        store.current.endCurrent(); // bank whatever was recording
         if (!closed) reconnectTimer = window.setTimeout(connect, 1500);
       };
       ws.onerror = () => ws?.close();
@@ -77,12 +94,7 @@ export function useTelemetry(url: string): TelemetryState {
 
     connect();
 
-    snapTimer = window.setInterval(() => {
-      setSummary(agg.current.summary());
-      const ra = new SessionAggregator();
-      for (const f of recentBuf.current) ra.add(f);
-      setRecent(ra.summary());
-    }, 300);
+    tickTimer = window.setInterval(bump, 300); // refresh live-derived UI a few times/sec
     hzTimer = window.setInterval(() => {
       setHz(frameCount.current);
       frameCount.current = 0;
@@ -91,11 +103,23 @@ export function useTelemetry(url: string): TelemetryState {
     return () => {
       closed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (snapTimer) clearInterval(snapTimer);
+      if (tickTimer) clearInterval(tickTimer);
       if (hzTimer) clearInterval(hzTimer);
       ws?.close();
     };
-  }, [url]);
+  }, [url, bump]);
 
-  return { conn, latest, driving, hz, summary, recent, reset };
+  return {
+    conn,
+    latest,
+    driving,
+    hz,
+    rev,
+    store: store.current,
+    endCurrent,
+    discardCurrent,
+    toggleInclude,
+    deleteSession,
+    clearAll,
+  };
 }

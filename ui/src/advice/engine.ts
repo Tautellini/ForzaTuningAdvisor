@@ -2,7 +2,13 @@ import type { SessionSummary } from "../session";
 import type { CurrentTune } from "../tune";
 import type { DisciplineProfile } from "../discipline";
 import type { PriorityId } from "../priorities";
-import type { TuneSnapshot } from "../tuninglog";
+import type { SnapshotMetrics } from "../tuninglog";
+import type { DisciplineId } from "../discipline";
+
+export interface LoopRef {
+  discipline: DisciplineId;
+  m: SnapshotMetrics;
+}
 
 export type Confidence = "high" | "medium" | "low";
 export type AdviceKind = "fix" | "opportunity";
@@ -106,7 +112,7 @@ export function analyzeSession(
   tune: CurrentTune,
   p: DisciplineProfile,
   priorities: PriorityId[],
-  prev?: TuneSnapshot | null,
+  prev?: LoopRef | null,
 ): Advice[] {
   if (!s || s.drivingFrames < MIN.frames) return [];
   const out: Advice[] = [];
