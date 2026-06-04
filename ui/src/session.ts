@@ -45,6 +45,20 @@ export interface SessionData {
   frontRollSum: number; // sum of |FL-FR| suspension travel (m) under load
   rearRollSum: number;
   maxRoll: number; // peak chassis roll (rad) under load
+  // corner-phase balance (front/rear slip-angle sums per phase)
+  entryF: number;
+  entryFSA: number;
+  entryRSA: number;
+  midF: number;
+  midFSA: number;
+  midRSA: number;
+  exitF: number;
+  exitFSA: number;
+  exitRSA: number;
+  // low- vs high-speed balance (for mechanical vs aero)
+  lowF: number;
+  lowFSA: number;
+  lowRSA: number;
   // damping: suspension-travel direction reversals (oscillation)
   frontRev: number;
   rearRev: number;
@@ -87,6 +101,14 @@ export interface SessionSummary {
   frontRollDeg: number; // estimated front body roll under load
   rearRollDeg: number;
   bodyRollDeg: number; // peak chassis roll
+  entryFrames: number;
+  midFrames: number;
+  exitFrames: number;
+  entryUndersteer: number; // front/rear slip-angle ratio per phase (>1 understeer)
+  midUndersteer: number;
+  exitUndersteer: number;
+  lowSpeedUndersteer: number; // balance below ~108 km/h (vs highSpeedUndersteerRatio)
+  lowSpeedCornerFrames: number;
   frontReversalRate: number; // suspension oscillations / second (damping)
   rearReversalRate: number;
   brakingFrames: number;
@@ -131,6 +153,18 @@ export function emptyData(): SessionData {
     frontRollSum: 0,
     rearRollSum: 0,
     maxRoll: 0,
+    entryF: 0,
+    entryFSA: 0,
+    entryRSA: 0,
+    midF: 0,
+    midFSA: 0,
+    midRSA: 0,
+    exitF: 0,
+    exitFSA: 0,
+    exitRSA: 0,
+    lowF: 0,
+    lowFSA: 0,
+    lowRSA: 0,
     frontRev: 0,
     rearRev: 0,
     lastFront: 0,
@@ -162,6 +196,14 @@ export function addFrame(d: SessionData, f: Telemetry): void {
   d.maxSpeed = Math.max(d.maxSpeed, f.speed);
   d.maxRpm = Math.max(d.maxRpm, f.rpm.cur);
   d.redline = Math.max(d.redline, f.rpm.max);
+
+  // "Clean" frame = not on a kerb / in a puddle / over rough surface. We exclude
+  // these from suspension/damping/roll metrics so bumps don't masquerade as setup.
+  const T = f.tires;
+  const clean =
+    T.fl.onRumble === 0 && T.fr.onRumble === 0 && T.rl.onRumble === 0 && T.rr.onRumble === 0 &&
+    T.fl.inPuddle === 0 && T.fr.inPuddle === 0 && T.rl.inPuddle === 0 && T.rr.inPuddle === 0 &&
+    Math.max(T.fl.surfaceRumble, T.fr.surfaceRumble, T.rl.surfaceRumble, T.rr.surfaceRumble) < 0.3;
 
   if (f.rpm.cur > 500 && f.throttle > 0.95) {
     const bin = Math.round(f.rpm.cur / RPM_BIN) * RPM_BIN;
@@ -226,9 +268,27 @@ export function addFrame(d: SessionData, f: Telemetry): void {
       if (maxCombined >= 0.9) d.hsNearLimit++;
       d.hsFrontSA += frontSA;
       d.hsRearSA += rearSA;
+    } else {
+      d.lowF++;
+      d.lowFSA += frontSA;
+      d.lowRSA += rearSA;
     }
-    // Body roll for camber estimation — only under real lateral load.
-    if (Math.abs(f.accel.x) / 9.81 >= 0.5) {
+    // Corner phase: entry (trail-braking/turn-in), exit (on power), mid (neither).
+    if (f.brake >= 0.2) {
+      d.entryF++;
+      d.entryFSA += frontSA;
+      d.entryRSA += rearSA;
+    } else if (f.throttle >= 0.45) {
+      d.exitF++;
+      d.exitFSA += frontSA;
+      d.exitRSA += rearSA;
+    } else {
+      d.midF++;
+      d.midFSA += frontSA;
+      d.midRSA += rearSA;
+    }
+    // Body roll for camber estimation — under real lateral load, clean surface only.
+    if (clean && Math.abs(f.accel.x) / 9.81 >= 0.5) {
       d.hardCorner++;
       d.frontRollSum += Math.abs(f.tires.fl.suspM - f.tires.fr.suspM);
       d.rearRollSum += Math.abs(f.tires.rl.suspM - f.tires.rr.suspM);
@@ -236,20 +296,23 @@ export function addFrame(d: SessionData, f: Telemetry): void {
     }
   }
 
-  if (f.tires.fl.suspNorm >= 0.97 || f.tires.fr.suspNorm >= 0.97) d.bottomFront++;
-  if (f.tires.rl.suspNorm >= 0.97 || f.tires.rr.suspNorm >= 0.97) d.bottomRear++;
-  if (f.tires.fl.suspNorm <= 0.03 || f.tires.fr.suspNorm <= 0.03) d.topFront++;
-  if (f.tires.rl.suspNorm <= 0.03 || f.tires.rr.suspNorm <= 0.03) d.topRear++;
+  // Bottoming / topping — clean surface only (kerbs & bumps cause spikes).
+  if (clean) {
+    if (f.tires.fl.suspNorm >= 0.97 || f.tires.fr.suspNorm >= 0.97) d.bottomFront++;
+    if (f.tires.rl.suspNorm >= 0.97 || f.tires.rr.suspNorm >= 0.97) d.bottomRear++;
+    if (f.tires.fl.suspNorm <= 0.03 || f.tires.fr.suspNorm <= 0.03) d.topFront++;
+    if (f.tires.rl.suspNorm <= 0.03 || f.tires.rr.suspNorm <= 0.03) d.topRear++;
+  }
 
   for (const k of CORNERS) {
     d.tempSum[k] += f.tires[k].temp;
     d.tempMax[k] = Math.max(d.tempMax[k], f.tires[k].temp);
   }
 
-  // Damping: count suspension-travel direction reversals (oscillation/bounce).
+  // Damping: suspension-travel direction reversals (oscillation) — clean only.
   const ft = (f.tires.fl.suspNorm + f.tires.fr.suspNorm) / 2;
   const rt = (f.tires.rl.suspNorm + f.tires.rr.suspNorm) / 2;
-  if (d.frames > 1) {
+  if (d.frames > 1 && clean) {
     const fd = ft - d.lastFront;
     if (Math.abs(fd) > 0.015) {
       const dir = fd > 0 ? 1 : -1;
@@ -303,6 +366,18 @@ export function mergeData(ds: SessionData[]): SessionData {
     out.frontRollSum += d.frontRollSum;
     out.rearRollSum += d.rearRollSum;
     out.maxRoll = Math.max(out.maxRoll, d.maxRoll);
+    out.entryF += d.entryF;
+    out.entryFSA += d.entryFSA;
+    out.entryRSA += d.entryRSA;
+    out.midF += d.midF;
+    out.midFSA += d.midFSA;
+    out.midRSA += d.midRSA;
+    out.exitF += d.exitF;
+    out.exitFSA += d.exitFSA;
+    out.exitRSA += d.exitRSA;
+    out.lowF += d.lowF;
+    out.lowFSA += d.lowFSA;
+    out.lowRSA += d.lowRSA;
     out.frontRev += d.frontRev;
     out.rearRev += d.rearRev;
     out.bottomFront += d.bottomFront;
@@ -399,6 +474,14 @@ export function summarize(d: SessionData): SessionSummary | null {
     rearRollDeg:
       d.hardCorner > 0 ? (Math.atan(d.rearRollSum / d.hardCorner / 1.55) * 180) / Math.PI : 0,
     bodyRollDeg: (d.maxRoll * 180) / Math.PI,
+    entryFrames: d.entryF,
+    midFrames: d.midF,
+    exitFrames: d.exitF,
+    entryUndersteer: d.entryRSA > 0.001 ? d.entryFSA / d.entryRSA : 1,
+    midUndersteer: d.midRSA > 0.001 ? d.midFSA / d.midRSA : 1,
+    exitUndersteer: d.exitRSA > 0.001 ? d.exitFSA / d.exitRSA : 1,
+    lowSpeedUndersteer: d.lowRSA > 0.001 ? d.lowFSA / d.lowRSA : 1,
+    lowSpeedCornerFrames: d.lowF,
     frontReversalRate: (() => {
       const s = Math.max(1, (d.lastT - d.firstT) / 1000);
       return d.frontRev / s;

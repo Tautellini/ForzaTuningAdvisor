@@ -419,40 +419,87 @@ export function analyzeSession(
     }
   }
 
-  // ---- Handling balance: under / oversteer (adaptive to severity) ----------
-  if (p.rules.balance && s.corneringFrames >= MIN.cornering) {
-    if (s.understeerRatio >= p.thr.understeerHigh) {
-      const step = clamp(r0((s.understeerRatio - 1) * 14), 3, 22);
+  // ---- Mid-corner balance: under / oversteer (cleanest balance signal) ------
+  if (p.rules.balance && s.midFrames >= MIN.cornering) {
+    if (s.midUndersteer >= p.thr.understeerHigh) {
+      const step = clamp(r0((s.midUndersteer - 1) * 14), 3, 22);
       out.push({
         id: "balance-understeer",
-        area: "Handling balance",
+        area: "Mid-corner balance",
         confidence: "medium",
         kind: "fix",
         recommendation:
           tune.frontARB != null
             ? `Front ARB ${r0(tune.frontARB)} → ~${r0(clamp(tune.frontARB - step, 1, 65))} (−${step})`
             : `Soften front ARB by ~${step} (or stiffen rear)`,
-        why: `In corners your front slip angle is ≈ ${r1(s.understeerRatio)}× the rear — the front gives up first, so the car pushes wide.`,
+        why: `Mid-corner your front slip angle is ≈ ${r1(s.midUndersteer)}× the rear — the front gives up first, so the car pushes wide.`,
         outcome:
           "Sharper turn-in and more front grip mid-corner. Trade-off: overdo it and it swings to oversteer.",
-        viz: { kind: "balance", ratio: s.understeerRatio },
+        viz: { kind: "balance", ratio: s.midUndersteer },
       });
-    } else if (s.understeerRatio > 0 && s.understeerRatio <= p.thr.oversteerLow) {
-      const ratio = 1 / s.understeerRatio;
+    } else if (s.midUndersteer > 0 && s.midUndersteer <= p.thr.oversteerLow) {
+      const ratio = 1 / s.midUndersteer;
       const step = clamp(r0((ratio - 1) * 14), 3, 22);
       out.push({
         id: "balance-oversteer",
-        area: "Handling balance",
+        area: "Mid-corner balance",
         confidence: "medium",
         kind: "fix",
         recommendation:
           tune.frontARB != null
             ? `Front ARB ${r0(tune.frontARB)} → ~${r0(clamp(tune.frontARB + step, 1, 65))} (+${step})`
             : `Stiffen front ARB by ~${step} (or soften rear)`,
-        why: `In corners your rear slip angle is ≈ ${r1(ratio)}× the front — the rear lets go first, making the car loose.`,
+        why: `Mid-corner your rear slip angle is ≈ ${r1(ratio)}× the front — the rear lets go first, making the car loose.`,
         outcome:
           "More stable rear, easier to get on power. Trade-off: too much and it turns into understeer.",
-        viz: { kind: "balance", ratio: s.understeerRatio },
+        viz: { kind: "balance", ratio: s.midUndersteer },
+      });
+    }
+  }
+
+  // ---- Corner-phase balance: entry (braking) & exit (on power) -------------
+  if (p.rules.balance && s.entryFrames >= 30 && s.entryUndersteer <= p.thr.oversteerLow) {
+    out.push({
+      id: "balance-entry-oversteer",
+      area: "Entry — loose under braking",
+      confidence: "medium",
+      kind: "fix",
+      recommendation: "Add a little rear toe-in, move brake balance forward, or soften rear decel diff.",
+      why: `Under braking & turn-in the rear slips ≈ ${r1(1 / s.entryUndersteer)}× the front — the back steps out on entry.`,
+      outcome: "Calmer, more confident turn-in. Trade-off: a touch less rotation into the corner.",
+      viz: { kind: "balance", ratio: s.entryUndersteer },
+    });
+  }
+  if (p.rules.balance && s.exitFrames >= 30) {
+    if (s.exitUndersteer <= p.thr.oversteerLow) {
+      const cur = tune.rearDiffAccel;
+      out.push({
+        id: "diff-exit-oversteer",
+        area: "Exit — power oversteer",
+        confidence: "medium",
+        kind: "fix",
+        field: "rearDiffAccel",
+        recommendation:
+          cur != null
+            ? `Rear diff acceleration ${r0(cur)}% → ~${r0(clamp(cur - 8, 0, 100))}%`
+            : "Soften diff acceleration (or soften rear springs)",
+        why: `On corner exit (on power) the rear slips ≈ ${r1(1 / s.exitUndersteer)}× the front — it gets loose as you pick up the throttle.`,
+        outcome: "Cleaner power-down on exit. Trade-off: a touch less rotation on throttle.",
+        viz:
+          cur != null
+            ? { kind: "delta", from: cur, to: clamp(cur - 8, 0, 100), min: 0, max: 100, unit: "%" }
+            : { kind: "balance", ratio: s.exitUndersteer },
+      });
+    } else if (s.exitUndersteer >= p.thr.understeerHigh) {
+      out.push({
+        id: "balance-exit-understeer",
+        area: "Exit — pushes on power",
+        confidence: "medium",
+        kind: "fix",
+        recommendation: "Soften front ARB/springs, or (AWD) shift center balance rearward.",
+        why: `On corner exit the front slips ≈ ${r1(s.exitUndersteer)}× the rear — it washes wide when you get on the power.`,
+        outcome: "More front bite on exit. Trade-off: can make entry/mid a bit looser.",
+        viz: { kind: "balance", ratio: s.exitUndersteer },
       });
     }
   }
@@ -490,6 +537,35 @@ export function analyzeSession(
           "Higher top speed and better straight-line lap time. Trade-off: less margin in fast corners — back it off gradually and re-check.",
         viz: { kind: "dir", dir: "less", label: "downforce" },
       });
+    }
+
+    // Mechanical vs aero: balance that's fine slow but off fast = an aero-balance issue.
+    if (s.lowSpeedCornerFrames >= 40 && s.highSpeedCornerFrames >= MIN.hsCorner) {
+      const hi = s.highSpeedUndersteerRatio;
+      const lo = s.lowSpeedUndersteer;
+      if (hi >= 1.2 && hi >= lo * 1.3) {
+        out.push({
+          id: "aero-balance-front",
+          area: "Aero balance",
+          confidence: "medium",
+          kind: "fix",
+          recommendation: "Add front downforce (or reduce rear) — push is aero, not mechanical.",
+          why: `The car is balanced in slow corners but understeers at speed (slow ${r1(lo)}× vs fast ${r1(hi)}× front/rear) — that's a front-aero shortfall, not a spring/ARB problem.`,
+          outcome: "More high-speed front bite without upsetting slow corners. Trade-off: a little more front drag.",
+          viz: { kind: "dir", dir: "more", label: "front downforce" },
+        });
+      } else if (hi <= 0.8 && lo >= hi * 1.3) {
+        out.push({
+          id: "aero-balance-rear",
+          area: "Aero balance",
+          confidence: "medium",
+          kind: "fix",
+          recommendation: "Add rear downforce (or reduce front) — looseness is aero, not mechanical.",
+          why: `The car is balanced in slow corners but goes loose at speed (slow ${r1(lo)}× vs fast ${r1(hi)}× front/rear) — that's a rear-aero shortfall, not a spring/ARB problem.`,
+          outcome: "More high-speed rear stability without upsetting slow corners. Trade-off: a little more rear drag.",
+          viz: { kind: "dir", dir: "more", label: "rear downforce" },
+        });
+      }
     }
   }
 
