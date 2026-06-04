@@ -12,8 +12,7 @@ import { loadPriorities, savePriorities, type PriorityId } from "./priorities";
 import { ConnectionBar } from "./components/ConnectionBar";
 import { SessionBar } from "./components/SessionBar";
 import { ModeSelector } from "./components/ModeSelector";
-import { Dashboard } from "./components/Dashboard";
-import { CarView } from "./components/CarView";
+import { LivePanel } from "./components/LivePanel";
 import { PowerCurveChart } from "./components/PowerCurveChart";
 import { TractionBrakes } from "./components/TractionBrakes";
 import { AdvicePanel } from "./components/AdvicePanel";
@@ -66,10 +65,7 @@ export default function App() {
           <div className="content-wrap">
             <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
             <SessionBar summary={summary} onReset={reset} />
-            <div className="topblock">
-              {latest && <Dashboard t={latest} />}
-              {latest && <CarView t={latest} />}
-            </div>
+            {latest && <LivePanel t={latest} />}
             <div className="vizrow">
               <PowerCurveChart summary={summary} liveRpm={latest?.rpm.cur ?? 0} />
               <TractionBrakes summary={summary} tune={tune} />
