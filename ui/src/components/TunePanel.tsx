@@ -61,8 +61,17 @@ function NumberField({
 const GEAR_COUNTS = [4, 5, 6, 7, 8, 9, 10];
 type ScalarKey = Exclude<keyof CurrentTune, "gearRatios" | "numGears">;
 
+const OPEN_KEY = "fta.tuneOpen";
+
 export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
-  const [open, setOpen] = useState(true);
+  // collapsed state persists so a configured tune stays out of the way
+  const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) !== "0");
+  const toggleOpen = () =>
+    setOpen((o) => {
+      const next = !o;
+      localStorage.setItem(OPEN_KEY, next ? "1" : "0");
+      return next;
+    });
 
   const update = (t: CurrentTune) => {
     onChange(t);
@@ -93,7 +102,7 @@ export function TunePanel({ tune, units, drivetrain, onChange }: Props) {
 
   return (
     <section className="tunepanel2">
-      <button className="tunepanel2-head" onClick={() => setOpen((o) => !o)}>
+      <button className="tunepanel2-head" onClick={toggleOpen}>
         <span className="tunestrip-title">Current tune</span>
         {setCount > 0 && <span className="tune-count">{setCount}</span>}
         <InfoDot text="Your car's current settings. Applies to every session. Enter values to get exact target numbers in the advice (comma or dot ok)." />
