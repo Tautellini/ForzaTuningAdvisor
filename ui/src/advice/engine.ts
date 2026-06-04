@@ -160,23 +160,31 @@ export function analyzeSession(
   }
 
   // ---- Drag: launch traction + minimum aero --------------------------------
-  if (p.rules.dragLaunch && s.powerFrames >= MIN.power && s.wheelspinFrac >= p.thr.wheelspin) {
-    const drop = clamp(r0(s.wheelspinFrac * 30), 5, 25);
-    const rec =
-      tune.diffAccel != null
-        ? `Diff acceleration ${r0(tune.diffAccel)}% → ~${r0(tune.diffAccel - drop)}%`
-        : `Lower diff acceleration by ~${drop}%`;
-    out.push({
-      id: "drag-launch",
-      area: "Launch traction",
-      confidence: "high",
-      kind: "fix",
-      recommendation: `${rec}; drop tire pressure slightly for a bigger contact patch`,
-      why: `The driven wheels spin in ${pct(s.wheelspinFrac)} of on-power frames — that's wasted grip off the line.`,
-      outcome:
-        "Quicker launch and lower ET. Trade-off: go too soft and it bogs instead of spinning — dial to the edge of traction.",
-      viz: { kind: "bar", value: s.wheelspinFrac, tone: "spin" },
-    });
+  if (p.rules.dragLaunch && s.powerFrames >= MIN.power) {
+    const dt = s.car.drivetrain;
+    const useRear = dt === 1 || (dt === 2 && s.rearSpinFrac >= s.frontSpinFrac);
+    const frac = useRear ? s.rearSpinFrac : s.frontSpinFrac;
+    if (frac >= p.thr.wheelspin) {
+      const drop = clamp(r0(frac * 30), 5, 25);
+      const key = useRear ? "rearDiffAccel" : "frontDiffAccel";
+      const axle = useRear ? "rear" : "front";
+      const cur = tune[key];
+      const rec =
+        cur != null
+          ? `${axle[0].toUpperCase() + axle.slice(1)} diff acceleration ${r0(cur)}% → ~${r0(clamp(cur - drop, 0, 100))}%`
+          : `Lower ${axle} diff acceleration by ~${drop}%`;
+      out.push({
+        id: "drag-launch",
+        area: "Launch traction",
+        confidence: "high",
+        kind: "fix",
+        recommendation: `${rec}; drop tire pressure slightly for a bigger contact patch`,
+        why: `The ${axle} wheels spin in ${pct(frac)} of on-power frames — that's wasted grip off the line.`,
+        outcome:
+          "Quicker launch and lower ET. Trade-off: go too soft and it bogs instead of spinning — dial to the edge of traction.",
+        viz: { kind: "bar", value: frac, tone: "spin" },
+      });
+    }
   }
   if (p.id === "drag") {
     out.push({
@@ -234,27 +242,59 @@ export function analyzeSession(
     }
   }
 
-  // ---- Differential: wheelspin (a fault here) ------------------------------
-  if (p.rules.diffWheelspin && s.powerFrames >= MIN.power && s.wheelspinFrac >= p.thr.wheelspin) {
-    const drop = clamp(r0(s.wheelspinFrac * 30), 5, 20);
-    const rec =
-      tune.diffAccel != null
-        ? `Diff acceleration ${r0(tune.diffAccel)}% → ~${r0(tune.diffAccel - drop)}%`
-        : `Lower diff acceleration by ~${drop}%`;
-    out.push({
-      id: "diff-wheelspin",
-      area: "Differential",
-      confidence: p.id === "road" ? "high" : "medium",
-      kind: "fix",
-      recommendation: rec,
-      why: `The ${s.drivenAxle} axle spins up in ${pct(s.wheelspinFrac)} of on-power frames — more than ideal for ${p.label.toLowerCase()}.`,
-      outcome:
-        "Cleaner drive off corners, more usable power. Trade-off: too low and the inside wheel spins on power instead — find where it just hooks.",
-      viz:
-        tune.diffAccel != null
-          ? { kind: "delta", from: tune.diffAccel, to: clamp(tune.diffAccel - drop, 0, 100), min: 0, max: 100, unit: "%" }
-          : { kind: "bar", value: s.wheelspinFrac, tone: "spin" },
-    });
+  // ---- Differential: per-axle wheelspin (front / rear / center) -------------
+  if (p.rules.diffWheelspin && s.powerFrames >= MIN.power) {
+    const dt = s.car.drivetrain;
+    const frontDriven = dt === 0 || dt === 2;
+    const rearDriven = dt === 1 || dt === 2;
+    const thr = p.thr.wheelspin;
+    const conf: Confidence = p.id === "road" ? "high" : "medium";
+
+    const axleCard = (axle: "front" | "rear", frac: number, key: "frontDiffAccel" | "rearDiffAccel") => {
+      const drop = clamp(r0(frac * 30), 5, 20);
+      const cur = tune[key];
+      out.push({
+        id: `diff-${axle}`,
+        area: `Differential — ${axle}`,
+        confidence: conf,
+        kind: "fix",
+        recommendation:
+          cur != null
+            ? `${axle[0].toUpperCase() + axle.slice(1)} diff acceleration ${r0(cur)}% → ~${r0(clamp(cur - drop, 0, 100))}%`
+            : `Lower ${axle} diff acceleration by ~${drop}%`,
+        why: `The ${axle} wheels spin in ${pct(frac)} of on-power frames — more than ideal for ${p.label.toLowerCase()}.`,
+        outcome: `Cleaner ${axle} drive off corners. Trade-off: too low and the inside ${axle} wheel spins on power — find where it just hooks.`,
+        viz:
+          cur != null
+            ? { kind: "delta", from: cur, to: clamp(cur - drop, 0, 100), min: 0, max: 100, unit: "%" }
+            : { kind: "bar", value: frac, tone: "spin" },
+      });
+    };
+
+    if (frontDriven && s.frontSpinFrac >= thr) axleCard("front", s.frontSpinFrac, "frontDiffAccel");
+    if (rearDriven && s.rearSpinFrac >= thr) axleCard("rear", s.rearSpinFrac, "rearDiffAccel");
+
+    // AWD center balance when one axle spins notably more than the other
+    if (dt === 2 && (s.frontSpinFrac >= thr || s.rearSpinFrac >= thr)) {
+      const diff = s.frontSpinFrac - s.rearSpinFrac;
+      if (Math.abs(diff) >= 0.08) {
+        const toRear = diff > 0; // front spins more -> push torque rearward
+        const cur = tune.centerBalance;
+        out.push({
+          id: "diff-center",
+          area: "Differential — center balance",
+          confidence: "medium",
+          kind: "fix",
+          recommendation:
+            cur != null
+              ? `Center balance ${r0(cur)}% rear → ~${r0(clamp(cur + (toRear ? 5 : -5), 0, 100))}% rear`
+              : `Shift center balance ~5% ${toRear ? "rearward" : "frontward"}`,
+          why: `The ${toRear ? "front" : "rear"} axle spins more (${pct(s.frontSpinFrac)} F vs ${pct(s.rearSpinFrac)} R) — send torque toward the axle that still has grip.`,
+          outcome: `More balanced drive out of corners. Trade-off: too far ${toRear ? "rearward makes it looser on power" : "frontward makes it push on power"}.`,
+          viz: { kind: "dir", dir: toRear ? "more" : "less", label: "rear torque" },
+        });
+      }
+    }
   }
 
   // ---- Springs / ride height: bottoming out --------------------------------
@@ -360,8 +400,8 @@ export function analyzeSession(
   if (p.rules.drift && s.corneringFrames >= MIN.cornering) {
     if (s.understeerRatio >= p.thr.understeerHigh) {
       const rec =
-        tune.diffAccel != null && tune.diffAccel < 90
-          ? `Diff acceleration ${r0(tune.diffAccel)}% → ~${r0(clamp(tune.diffAccel + 15, 0, 100))}%`
+        tune.rearDiffAccel != null && tune.rearDiffAccel < 90
+          ? `Rear diff acceleration ${r0(tune.rearDiffAccel)}% → ~${r0(clamp(tune.rearDiffAccel + 15, 0, 100))}%`
           : `Lock diff toward 90–100%; stiffen front ARB / soften rear`;
       out.push({
         id: "drift-rotation-low",

@@ -84,7 +84,12 @@ export default function App() {
               <ModeSelector active={discipline} onChange={changeDiscipline} profile={profile} />
               <SettingsBar units={units} onChange={changeUnits} />
             </div>
-            <TunePanel tune={tune} units={units} onChange={setTune} />
+            <TunePanel
+              tune={tune}
+              units={units}
+              drivetrain={latest.car.drivetrain}
+              onChange={setTune}
+            />
             <SessionStrip
               store={store}
               recording={store.recording}
