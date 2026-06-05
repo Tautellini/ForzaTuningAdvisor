@@ -52,6 +52,15 @@ export const pressure = (psi: number, u: Units): Q =>
 export const pressureUnit = (u: Units): string => (u.system === "imperial" ? "psi" : "bar");
 // step for pressure suggestions, in the user's unit (~1 psi worth)
 export const pressureStep = (u: Units): number => (u.system === "imperial" ? 1 : 0.07);
+// psi -> display value (number only; tune-sheet pressures live in display units)
+export const pressureVal = (psi: number, u: Units): number =>
+  u.system === "imperial" ? psi : psi * 0.0689476;
+/** A psi range formatted for display: "22–28 psi" / "1.5–1.9 bar". */
+export function pressureRange(loPsi: number, hiPsi: number, u: Units): string {
+  const f = (v: number) =>
+    u.system === "imperial" ? String(Math.round(v)) : (Math.round(v * 10) / 10).toFixed(1);
+  return `${f(pressureVal(loPsi, u))}–${f(pressureVal(hiPsi, u))} ${pressureUnit(u)}`;
+}
 export const lengthShort = (u: Units): string => (u.system === "imperial" ? "in" : "cm");
 // step for ride-height suggestions (~1 cm / ~0.4 in)
 export const rideStep = (u: Units): number => (u.system === "imperial" ? 0.4 : 1);

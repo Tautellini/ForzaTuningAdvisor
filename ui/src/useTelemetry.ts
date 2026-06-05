@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Telemetry } from "./types";
 import type { DisciplineId } from "./discipline";
-import { SessionStore } from "./sessions";
+import { GarageStore } from "./garage/store";
+import { loadCarDb } from "./carDb";
 
 export type ConnState = "connecting" | "open" | "closed";
 
@@ -10,16 +11,14 @@ export interface TelemetryState {
   latest: Telemetry | null;
   driving: boolean;
   hz: number;
-  /** Last car seen while actually driving (survives menus & refresh). */
-  lastCar: Telemetry["car"] | null;
-  /** Bumps whenever something the UI derives from the store may have changed. */
+  /** Bumps whenever something the UI derives from the garage may have changed. */
   rev: number;
-  store: SessionStore;
-  endCurrent: () => void;
-  discardCurrent: () => void;
-  toggleInclude: (id: string) => void;
-  deleteSession: (id: string) => void;
-  clearAll: () => void;
+  /** Garage storage finished loading (recording starts only after this). */
+  ready: boolean;
+  /** Car-name DB: null = loading, false = failed (names fall back to ordinals). */
+  carDbOk: boolean | null;
+  garage: GarageStore;
+  bump: () => void;
 }
 
 export function useTelemetry(url: string, discipline: DisciplineId): TelemetryState {
@@ -28,48 +27,24 @@ export function useTelemetry(url: string, discipline: DisciplineId): TelemetrySt
   const [driving, setDriving] = useState(false);
   const [hz, setHz] = useState(0);
   const [rev, setRev] = useState(0);
+  const [ready, setReady] = useState(false);
+  const [carDbOk, setCarDbOk] = useState<boolean | null>(null);
   const bump = useCallback(() => setRev((r) => r + 1), []);
 
-  const [lastCar, setLastCar] = useState<Telemetry["car"] | null>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("fta.lastCar") ?? "null");
-    } catch {
-      return null;
-    }
-  });
-  const lastCarRef = useRef<Telemetry["car"] | null>(lastCar);
+  const garage = useRef<GarageStore | null>(null);
+  if (!garage.current) garage.current = new GarageStore(bump);
 
-  const store = useRef(new SessionStore());
   const disciplineRef = useRef(discipline);
   disciplineRef.current = discipline;
   const frameCount = useRef(0);
+  const sawFrame = useRef(false); // frames since the last UI tick
 
-  const endCurrent = useCallback(() => {
-    store.current.endCurrent();
-    bump();
-  }, [bump]);
-  const discardCurrent = useCallback(() => {
-    store.current.discardCurrent();
-    bump();
-  }, [bump]);
-  const toggleInclude = useCallback(
-    (id: string) => {
-      store.current.toggleInclude(id);
-      bump();
-    },
-    [bump],
-  );
-  const deleteSession = useCallback(
-    (id: string) => {
-      store.current.remove(id);
-      bump();
-    },
-    [bump],
-  );
-  const clearAll = useCallback(() => {
-    store.current.clearAll();
-    bump();
-  }, [bump]);
+  useEffect(() => {
+    void garage.current!.init().then(() => setReady(true));
+    loadCarDb()
+      .then(() => setCarDbOk(true))
+      .catch(() => setCarDbOk(false));
+  }, []);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -79,10 +54,24 @@ export function useTelemetry(url: string, discipline: DisciplineId): TelemetrySt
     let closed = false;
 
     const connect = () => {
+      if (closed) return;
       setConn("connecting");
-      ws = new WebSocket(url);
-      ws.onopen = () => setConn("open");
-      ws.onmessage = (ev) => {
+      let sock: WebSocket;
+      try {
+        sock = new WebSocket(url);
+      } catch {
+        reconnectTimer = window.setTimeout(connect, 1500);
+        return;
+      }
+      ws = sock;
+      // Every handler checks it still speaks for the CURRENT socket — a dying
+      // socket's late events must never stomp the state of its replacement
+      // (that exact race showed "Bridge not found" while connected).
+      sock.onopen = () => {
+        if (!closed && ws === sock) setConn("open");
+      };
+      sock.onmessage = (ev) => {
+        if (closed || ws !== sock) return;
         let t: Telemetry;
         try {
           t = JSON.parse(ev.data as string) as Telemetry;
@@ -90,31 +79,31 @@ export function useTelemetry(url: string, discipline: DisciplineId): TelemetrySt
           return;
         }
         frameCount.current++;
+        sawFrame.current = true;
         setLatest(t);
         setDriving(t.raceOn === 1);
-        store.current.feed(t, disciplineRef.current);
-        // Remember the real car (only valid while driving), persist it.
-        if (t.raceOn === 1) {
-          const prev = lastCarRef.current;
-          if (!prev || prev.ordinal !== t.car.ordinal || prev.drivetrain !== t.car.drivetrain) {
-            lastCarRef.current = t.car;
-            setLastCar(t.car);
-            localStorage.setItem("fta.lastCar", JSON.stringify(t.car));
-          }
-        }
+        garage.current!.feed(t, disciplineRef.current);
       };
-      ws.onclose = () => {
+      sock.onclose = () => {
+        if (closed || ws !== sock) return; // torn down or superseded
         setConn("closed");
         setDriving(false);
-        store.current.endCurrent(); // bank whatever was recording
-        if (!closed) reconnectTimer = window.setTimeout(connect, 1500);
+        garage.current!.endCurrent(); // bank whatever was recording
+        reconnectTimer = window.setTimeout(connect, 1500);
       };
-      ws.onerror = () => ws?.close();
+      sock.onerror = () => sock.close(); // close THIS socket, never a newer one
     };
 
     connect();
 
-    tickTimer = window.setInterval(bump, 300); // refresh live-derived UI a few times/sec
+    // Refresh live-derived UI a few times/sec — but only when frames actually
+    // arrived; store actions bump() directly, so an idle app recomputes nothing.
+    tickTimer = window.setInterval(() => {
+      if (sawFrame.current) {
+        sawFrame.current = false;
+        bump();
+      }
+    }, 300);
     hzTimer = window.setInterval(() => {
       setHz(frameCount.current);
       frameCount.current = 0;
@@ -129,18 +118,5 @@ export function useTelemetry(url: string, discipline: DisciplineId): TelemetrySt
     };
   }, [url, bump]);
 
-  return {
-    conn,
-    latest,
-    driving,
-    hz,
-    lastCar,
-    rev,
-    store: store.current,
-    endCurrent,
-    discardCurrent,
-    toggleInclude,
-    deleteSession,
-    clearAll,
-  };
+  return { conn, latest, driving, hz, rev, ready, carDbOk, garage: garage.current, bump };
 }

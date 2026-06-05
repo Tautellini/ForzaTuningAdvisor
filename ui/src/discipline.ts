@@ -1,7 +1,10 @@
 // Tuning goals differ by discipline, so each mode defines which advice rules
 // run, their trigger thresholds, and what "good balance" means.
 
-export type DisciplineId = "road" | "rally" | "dirt" | "offroad" | "drift" | "drag";
+// Mirrors Forza's own event types: Dirt racing IS rally (a mix of gravel,
+// dirt and tarmac), Offroad is Cross Country. A former separate "rally" id
+// merged into "dirt"; normalizeDisciplineId maps stored data forward.
+export type DisciplineId = "road" | "dirt" | "offroad" | "drift" | "drag";
 
 export interface DisciplineProfile {
   id: DisciplineId;
@@ -19,7 +22,6 @@ export interface DisciplineProfile {
     drift: boolean; // drift-specific rotation advice
     dragLaunch: boolean; // launch traction advice
     aero: boolean; // downforce level + front/rear balance
-    opportunity: boolean; // surface headroom-based opportunities (bias-driven)
     alignment: boolean; // camber (roll-based) + toe/caster tip
     damping: boolean; // low-confidence damping from oscillation
   };
@@ -27,11 +29,30 @@ export interface DisciplineProfile {
     wheelspin: number; // frac of on-power frames before flagging
     bottoming: number;
     topping: number;
+    /** Locked fraction of ALL braking frames (any pedal), so values run low. */
     lockup: number;
     understeerHigh: number; // front/rear slip-angle ratio above = understeer
     oversteerLow: number; // ratio below = oversteer
     hotTire: number; // deg F
   };
+  /**
+   * Tire-pressure window per axle, in psi (converted at display time).
+   * Telemetry has no pressure channel, so this is knowledge, not measurement:
+   * community-established windows the entered SHEET is checked against.
+   */
+  psiWindow: Record<"front" | "rear", [number, number]>;
+  /**
+   * Caster floor (deg). Caster has no telemetry signal at all, so this too is
+   * a sheet check: below the floor the engine suggests raising toward 6–7°
+   * (Forza's max is 7; high caster is nearly free on a pad).
+   */
+  casterMin: number;
+  /**
+   * Diff-acceleration floor (%). On loose surfaces wheelspin is the SURFACE,
+   * not the diff — without a floor the wheelspin rule would ratchet the
+   * advice toward a fully open diff (0%), which kills drive off-road.
+   */
+  diffAccelFloor: number;
   /** For springs/ride-height advice: offroad shouldn't be told to drop ride height. */
   preferHigherRide: boolean;
 }
@@ -48,7 +69,6 @@ const BASE_RULES: DisciplineProfile["rules"] = {
   drift: false,
   dragLaunch: false,
   aero: true,
-  opportunity: true,
   alignment: true,
   damping: true,
 };
@@ -63,59 +83,52 @@ export const DISCIPLINES: DisciplineProfile[] = [
       wheelspin: 0.15,
       bottoming: 0.06,
       topping: 0.1,
-      lockup: 0.12,
+      lockup: 0.07,
       understeerHigh: 1.5,
       oversteerLow: 0.67,
       hotTire: 235,
     },
+    psiWindow: { front: [26, 33], rear: [26, 33] }, // ~1.8–2.3 bar
+    casterMin: 5,
+    diffAccelFloor: 15,
     preferHigherRide: false,
   },
   {
-    id: "rally",
-    label: "Rally",
-    blurb: "Mixed surfaces — some slip is normal, setup runs a bit softer and taller.",
+    id: "dirt",
+    label: "Dirt",
+    blurb: "Rally-style mix of dirt, gravel and tarmac — some slip is normal; runs softer and taller.",
     rules: { ...BASE_RULES },
     thr: {
       wheelspin: 0.3,
       bottoming: 0.12,
       topping: 0.15,
-      lockup: 0.2,
+      lockup: 0.12,
       understeerHigh: 1.8,
       oversteerLow: 0.55,
       hotTire: 225,
     },
-    preferHigherRide: true,
-  },
-  {
-    id: "dirt",
-    label: "Dirt",
-    blurb: "Loose surface — wheelspin and slides are expected; balance still matters.",
-    rules: { ...BASE_RULES, aero: false },
-    thr: {
-      wheelspin: 0.42,
-      bottoming: 0.16,
-      topping: 0.2,
-      lockup: 0.25,
-      understeerHigh: 2.0,
-      oversteerLow: 0.5,
-      hotTire: 215,
-    },
+    psiWindow: { front: [22, 28], rear: [22, 28] }, // ~1.5–1.9 bar, mid ≈ 1.7
+    casterMin: 4.5,
+    diffAccelFloor: 35, // loose surface — keep the axle driving as a unit
     preferHigherRide: true,
   },
   {
     id: "offroad",
     label: "Offroad",
-    blurb: "Rough terrain & jumps — run high and soft; bottoming is partly unavoidable.",
+    blurb: "Cross Country — rough terrain & jumps; run high and soft, bottoming is partly unavoidable.",
     rules: { ...BASE_RULES, topping: false, aero: false },
     thr: {
       wheelspin: 0.55,
       bottoming: 0.28,
       topping: 0.3,
-      lockup: 0.3,
+      lockup: 0.18,
       understeerHigh: 2.2,
       oversteerLow: 0.45,
       hotTire: 210,
     },
+    psiWindow: { front: [15, 22], rear: [15, 22] }, // ~1.0–1.5 bar
+    casterMin: 4,
+    diffAccelFloor: 40,
     preferHigherRide: true,
   },
   {
@@ -140,6 +153,10 @@ export const DISCIPLINES: DisciplineProfile[] = [
       oversteerLow: 0.0,
       hotTire: 245,
     },
+    // wide & style-dependent: front for bite, rear high to keep slides alive
+    psiWindow: { front: [28, 36], rear: [28, 42] },
+    casterMin: 6.5, // max caster = steering angle + camber gain in slides
+    diffAccelFloor: 60, // unused (diffWheelspin off) — drift wants it locked anyway
     preferHigherRide: false,
   },
   {
@@ -156,7 +173,6 @@ export const DISCIPLINES: DisciplineProfile[] = [
       tireTemp: false,
       dragLaunch: true,
       aero: false,
-      opportunity: false,
       alignment: false,
       damping: false,
     },
@@ -169,6 +185,10 @@ export const DISCIPLINES: DisciplineProfile[] = [
       oversteerLow: 0,
       hotTire: 999,
     },
+    // rear low for the launch contact patch, front high to cut rolling drag
+    psiWindow: { front: [30, 55], rear: [13, 20] },
+    casterMin: 3, // straight line — caster barely matters (alignment off anyway)
+    diffAccelFloor: 20,
     preferHigherRide: false,
   },
 ];
@@ -177,10 +197,20 @@ export const DISCIPLINE_BY_ID: Record<DisciplineId, DisciplineProfile> = Object.
   DISCIPLINES.map((d) => [d.id, d]),
 ) as Record<DisciplineId, DisciplineProfile>;
 
+/**
+ * Map a stored discipline id forward: "rally" merged into "dirt"; anything
+ * unknown falls back to "road". Persisted sessions/setups and the saved
+ * selector value can predate the merge.
+ */
+export function normalizeDisciplineId(id: string): DisciplineId {
+  if (id === "rally") return "dirt";
+  return DISCIPLINE_BY_ID[id as DisciplineId] ? (id as DisciplineId) : "road";
+}
+
 const KEY = "fta.discipline";
 export function loadDiscipline(): DisciplineId {
-  const v = localStorage.getItem(KEY) as DisciplineId | null;
-  return v && DISCIPLINE_BY_ID[v] ? v : "road";
+  const v = localStorage.getItem(KEY);
+  return v ? normalizeDisciplineId(v) : "road";
 }
 export function saveDiscipline(id: DisciplineId) {
   localStorage.setItem(KEY, id);

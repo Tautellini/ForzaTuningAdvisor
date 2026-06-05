@@ -21,9 +21,9 @@ function AxleBar({ label, frac, kind, muted }: { label: string; frac: number; ki
 export function TractionBrakes({ summary, tune }: Props) {
   if (!summary) {
     return (
-      <div className="viz-card">
-        <div className="viz-head">
-          <h3>Traction &amp; brakes</h3>
+      <div className="cov-diagram">
+        <div className="cov-diagram-head">
+          <h4>Traction &amp; brakes</h4>
         </div>
         <div className="viz-empty">No driving data yet.</div>
       </div>
@@ -34,12 +34,11 @@ export function TractionBrakes({ summary, tune }: Props) {
   const rearDriven = dt === 1 || dt === 2;
 
   return (
-    <div className="viz-card">
-      <div className="viz-head">
-        <h3>Traction &amp; brakes</h3>
+    <div className="cov-diagram">
+      <div className="cov-diagram-head">
+        <h4>Traction &amp; brakes</h4>
         <span className="viz-sub">per axle · this session</span>
       </div>
-
       <div className="tb-group">
         <div className="tb-title">Wheelspin under power</div>
         <AxleBar label="Front" frac={summary.frontSpinFrac} kind="spin" muted={!frontDriven} />

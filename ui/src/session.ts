@@ -19,6 +19,13 @@ export interface SessionData {
   frames: number;
   firstT: number;
   lastT: number;
+  /**
+   * Actual driving time in ms — sum of per-frame deltas (gaps over 250ms
+   * don't count, so pauses/menus/game-clock resets are excluded). Sessions
+   * stored before this field exist without it; readers fall back to the
+   * lastT-firstT window.
+   */
+  durMs: number;
   car: Telemetry["car"] | null;
   maxSpeed: number;
   maxRpm: number;
@@ -29,12 +36,33 @@ export interface SessionData {
   spinFrames: number;
   frontSpin: number;
   rearSpin: number;
-  brakingFrames: number;
+  brakingFrames: number; // any braking (>=15% pedal) at speed
   frontLock: number;
   rearLock: number;
+  // pedal position at the moment of lockup — locking at LOW pedal means the
+  // pressure is far too high, a stronger signal than locking at a full stomp
+  lockFrames: number;
+  lockPedalSum: number;
+  // mid-corner throttle lifts and whether the rear stepped out right after
+  // (lift-off oversteer -> decel diff advice)
+  liftEvents: number;
+  liftOS: number;
+  lastThr: number; // transient
+  liftWin: number; // transient: frames left in the post-lift watch window
+  liftFlagged: number; // transient: this lift already counted
   corneringFrames: number;
   frontSASum: number;
   rearSASum: number;
+  // straight-line scrub (toe estimate): slip angle with the steering centered
+  // at speed — static toe shows up as a constant per-axle slip angle
+  straightF: number;
+  straightFSA: number;
+  straightRSA: number;
+  // pitch usage: how deep the suspension sits under hard braking / hard power
+  hardBrakeF: number;
+  diveF: number;
+  hardPowerF: number;
+  squatF: number;
   maxLatG: number;
   nearLimit: number;
   hsCorner: number;
@@ -78,7 +106,6 @@ export interface SessionSummary {
   drivingFrames: number;
   durationS: number;
   car: Telemetry["car"];
-  maxSpeed: number;
   maxRpm: number;
   powerCurve: { rpm: number; power: number; torque: number }[];
   peakPowerRpm: number;
@@ -91,16 +118,25 @@ export interface SessionSummary {
   drivenAxle: "front" | "rear" | "all";
   frontLockFrac: number;
   rearLockFrac: number;
+  lockFrames: number; // frames with any axle locked while braking
+  lockPedalAvg: number; // average brake-pedal position during those frames
+  liftEvents: number; // mid-corner throttle lifts
+  liftOversteerFrac: number; // fraction where the rear stepped out after the lift
   bottoming: Record<"front" | "rear", number>;
   topping: Record<"front" | "rear", number>;
   understeerRatio: number;
-  avgFrontSlipAngle: number;
   avgRearSlipAngle: number;
+  straightFrames: number; // steering centered, at speed, clean surface
+  frontScrubDeg: number; // avg straight-line slip angle per axle ≈ toe scrub
+  rearScrubDeg: number;
+  hardBrakeFrames: number; // >=50% pedal, clean
+  diveFrac: number; // fraction of those with the front deep in its travel
+  hardPowerFrames: number; // >=80% throttle, clean
+  squatFrac: number; // fraction of those with the rear deep in its travel
   corneringFrames: number;
   hardCornerFrames: number;
   frontRollDeg: number; // estimated front body roll under load
   rearRollDeg: number;
-  bodyRollDeg: number; // peak chassis roll
   entryFrames: number;
   midFrames: number;
   exitFrames: number;
@@ -119,7 +155,6 @@ export interface SessionSummary {
   highSpeedNearLimitFrac: number;
   highSpeedUndersteerRatio: number;
   tireTempAvg: Record<CornerKey, number>;
-  tireTempMax: Record<CornerKey, number>;
 }
 
 export function emptyData(): SessionData {
@@ -127,6 +162,7 @@ export function emptyData(): SessionData {
     frames: 0,
     firstT: 0,
     lastT: 0,
+    durMs: 0,
     car: null,
     maxSpeed: 0,
     maxRpm: 0,
@@ -140,9 +176,23 @@ export function emptyData(): SessionData {
     brakingFrames: 0,
     frontLock: 0,
     rearLock: 0,
+    lockFrames: 0,
+    lockPedalSum: 0,
+    liftEvents: 0,
+    liftOS: 0,
+    lastThr: 0,
+    liftWin: 0,
+    liftFlagged: 0,
     corneringFrames: 0,
     frontSASum: 0,
     rearSASum: 0,
+    straightF: 0,
+    straightFSA: 0,
+    straightRSA: 0,
+    hardBrakeF: 0,
+    diveF: 0,
+    hardPowerF: 0,
+    squatF: 0,
     maxLatG: 0,
     nearLimit: 0,
     hsCorner: 0,
@@ -189,7 +239,12 @@ function drivenKeys(dt: number): CornerKey[] {
 /** Accumulate one driving frame into a SessionData (mutates). Ignores idle frames. */
 export function addFrame(d: SessionData, f: Telemetry): void {
   if (f.raceOn !== 1) return;
-  if (d.frames === 0) d.firstT = f.t;
+  if (d.frames === 0) {
+    d.firstT = f.t;
+  } else {
+    const dt = f.t - d.lastT;
+    if (dt > 0 && dt <= 250) d.durMs = (d.durMs ?? 0) + dt;
+  }
   d.lastT = f.t;
   d.frames++;
   d.car = f.car;
@@ -240,13 +295,61 @@ export function addFrame(d: SessionData, f: Telemetry): void {
     if (rSlip >= 0.18) d.rearSpin++;
   }
 
-  if (f.brake >= 0.55 && f.speed > 8) {
+  // Braking: ANY pedal counts as evidence (a 15–55% "trail braking" band was
+  // collected separately before, but a trigger sweeps through any band in a
+  // blink — the gate never filled). Pressure problems are detected from the
+  // pedal position at the moment of lockup instead.
+  if (f.speed > 8 && f.brake >= 0.15) {
     d.brakingFrames++;
     const fl = (-f.tires.fl.slipRatio - f.tires.fr.slipRatio) / 2;
     const rl = (-f.tires.rl.slipRatio - f.tires.rr.slipRatio) / 2;
     if (fl >= 0.18) d.frontLock++;
     if (rl >= 0.18) d.rearLock++;
+    if (fl >= 0.18 || rl >= 0.18) {
+      d.lockFrames = (d.lockFrames ?? 0) + 1;
+      d.lockPedalSum = (d.lockPedalSum ?? 0) + f.brake;
+    }
   }
+
+  // Straight-line scrub (toe estimate): with the steering centered at speed
+  // on a clean surface, a constant per-axle slip angle ≈ the static toe.
+  if (clean && Math.abs(f.steer) < 0.04 && f.speed > 20 && f.brake < 0.05) {
+    d.straightF = (d.straightF ?? 0) + 1;
+    d.straightFSA =
+      (d.straightFSA ?? 0) + (Math.abs(f.tires.fl.slipAngle) + Math.abs(f.tires.fr.slipAngle)) / 2;
+    d.straightRSA =
+      (d.straightRSA ?? 0) + (Math.abs(f.tires.rl.slipAngle) + Math.abs(f.tires.rr.slipAngle)) / 2;
+  }
+
+  // Pitch usage: nose-dive under hard braking, rear squat under hard power.
+  // Deep travel here (not bottomed, just deep) = springs soft for the load.
+  if (clean && f.brake >= 0.5 && f.speed > 8) {
+    d.hardBrakeF = (d.hardBrakeF ?? 0) + 1;
+    if ((f.tires.fl.suspNorm + f.tires.fr.suspNorm) / 2 >= 0.85) d.diveF = (d.diveF ?? 0) + 1;
+  }
+  if (clean && f.throttle >= 0.8 && f.speed > 4) {
+    d.hardPowerF = (d.hardPowerF ?? 0) + 1;
+    if ((f.tires.rl.suspNorm + f.tires.rr.suspNorm) / 2 >= 0.85) d.squatF = (d.squatF ?? 0) + 1;
+  }
+
+  // Lift-off oversteer probe: a throttle lift while cornering opens a short
+  // watch window; the rear letting go inside it counts as one event.
+  const corneringNow = Math.abs(f.steer) >= 0.25 && f.speed > 12;
+  if (corneringNow && (d.lastThr ?? 0) > 0.4 && f.throttle < 0.1) {
+    d.liftEvents = (d.liftEvents ?? 0) + 1;
+    d.liftWin = 30; // ~0.3–0.5s depending on feed rate
+    d.liftFlagged = 0;
+  }
+  if ((d.liftWin ?? 0) > 0) {
+    d.liftWin!--;
+    const fSAw = (Math.abs(f.tires.fl.slipAngle) + Math.abs(f.tires.fr.slipAngle)) / 2;
+    const rSAw = (Math.abs(f.tires.rl.slipAngle) + Math.abs(f.tires.rr.slipAngle)) / 2;
+    if (!d.liftFlagged && rSAw > fSAw * 1.4 && rSAw > 0.06) {
+      d.liftOS = (d.liftOS ?? 0) + 1;
+      d.liftFlagged = 1;
+    }
+  }
+  d.lastThr = f.throttle;
 
   d.maxLatG = Math.max(d.maxLatG, Math.abs(f.accel.x) / 9.81);
 
@@ -341,6 +444,7 @@ export function mergeData(ds: SessionData[]): SessionData {
       firstSet = true;
     }
     out.lastT = Math.max(out.lastT, d.lastT);
+    out.durMs += drivingMs(d); // durations SUM across sessions, windows don't
     out.frames += d.frames;
     if (d.car) out.car = d.car;
     out.maxSpeed = Math.max(out.maxSpeed, d.maxSpeed);
@@ -353,9 +457,21 @@ export function mergeData(ds: SessionData[]): SessionData {
     out.brakingFrames += d.brakingFrames;
     out.frontLock += d.frontLock;
     out.rearLock += d.rearLock;
+    // ?? guards: sessions stored before these stats existed
+    out.lockFrames += d.lockFrames ?? 0;
+    out.lockPedalSum += d.lockPedalSum ?? 0;
+    out.liftEvents += d.liftEvents ?? 0;
+    out.liftOS += d.liftOS ?? 0;
     out.corneringFrames += d.corneringFrames;
     out.frontSASum += d.frontSASum;
     out.rearSASum += d.rearSASum;
+    out.straightF += d.straightF ?? 0;
+    out.straightFSA += d.straightFSA ?? 0;
+    out.straightRSA += d.straightRSA ?? 0;
+    out.hardBrakeF += d.hardBrakeF ?? 0;
+    out.diveF += d.diveF ?? 0;
+    out.hardPowerF += d.hardPowerF ?? 0;
+    out.squatF += d.squatF ?? 0;
     out.maxLatG = Math.max(out.maxLatG, d.maxLatG);
     out.nearLimit += d.nearLimit;
     out.hsCorner += d.hsCorner;
@@ -408,10 +524,16 @@ export function mergeData(ds: SessionData[]): SessionData {
   return out;
 }
 
+/** Driving time of one data bag, with a fallback for pre-durMs stored sessions. */
+function drivingMs(d: SessionData): number {
+  return (d.durMs ?? 0) > 0 ? d.durMs : Math.max(0, d.lastT - d.firstT);
+}
+
 /** Compute a SessionSummary from a (possibly merged) SessionData. */
 export function summarize(d: SessionData): SessionSummary | null {
   if (d.frames === 0 || !d.car) return null;
   const f = d.frames;
+  const durS = drivingMs(d) / 1000;
 
   const curve = Object.entries(d.power)
     .map(([rpm, v]) => ({ rpm: Number(rpm), power: v.power, torque: v.torque }))
@@ -447,9 +569,8 @@ export function summarize(d: SessionData): SessionSummary | null {
 
   return {
     drivingFrames: f,
-    durationS: Math.max(0, (d.lastT - d.firstT) / 1000),
+    durationS: durS,
     car: d.car,
-    maxSpeed: d.maxSpeed * 3.6,
     maxRpm: d.maxRpm,
     powerCurve: curve,
     peakPowerRpm,
@@ -462,18 +583,29 @@ export function summarize(d: SessionData): SessionSummary | null {
     drivenAxle,
     frontLockFrac: d.brakingFrames > 0 ? d.frontLock / d.brakingFrames : 0,
     rearLockFrac: d.brakingFrames > 0 ? d.rearLock / d.brakingFrames : 0,
+    lockFrames: d.lockFrames ?? 0,
+    lockPedalAvg: (d.lockFrames ?? 0) > 0 ? (d.lockPedalSum ?? 0) / d.lockFrames : 0,
+    liftEvents: d.liftEvents ?? 0,
+    liftOversteerFrac: (d.liftEvents ?? 0) > 0 ? (d.liftOS ?? 0) / d.liftEvents : 0,
     bottoming: { front: d.bottomFront / f, rear: d.bottomRear / f },
     topping: { front: d.topFront / f, rear: d.topRear / f },
     understeerRatio: d.rearSASum > 0.001 ? d.frontSASum / d.rearSASum : 1,
-    avgFrontSlipAngle: d.corneringFrames > 0 ? d.frontSASum / d.corneringFrames : 0,
     avgRearSlipAngle: d.corneringFrames > 0 ? d.rearSASum / d.corneringFrames : 0,
+    straightFrames: d.straightF ?? 0,
+    frontScrubDeg:
+      (d.straightF ?? 0) > 0 ? (((d.straightFSA ?? 0) / d.straightF) * 180) / Math.PI : 0,
+    rearScrubDeg:
+      (d.straightF ?? 0) > 0 ? (((d.straightRSA ?? 0) / d.straightF) * 180) / Math.PI : 0,
+    hardBrakeFrames: d.hardBrakeF ?? 0,
+    diveFrac: (d.hardBrakeF ?? 0) > 0 ? (d.diveF ?? 0) / d.hardBrakeF : 0,
+    hardPowerFrames: d.hardPowerF ?? 0,
+    squatFrac: (d.hardPowerF ?? 0) > 0 ? (d.squatF ?? 0) / d.hardPowerF : 0,
     corneringFrames: d.corneringFrames,
     hardCornerFrames: d.hardCorner,
     frontRollDeg:
       d.hardCorner > 0 ? (Math.atan(d.frontRollSum / d.hardCorner / 1.55) * 180) / Math.PI : 0,
     rearRollDeg:
       d.hardCorner > 0 ? (Math.atan(d.rearRollSum / d.hardCorner / 1.55) * 180) / Math.PI : 0,
-    bodyRollDeg: (d.maxRoll * 180) / Math.PI,
     entryFrames: d.entryF,
     midFrames: d.midF,
     exitFrames: d.exitF,
@@ -482,14 +614,8 @@ export function summarize(d: SessionData): SessionSummary | null {
     exitUndersteer: d.exitRSA > 0.001 ? d.exitFSA / d.exitRSA : 1,
     lowSpeedUndersteer: d.lowRSA > 0.001 ? d.lowFSA / d.lowRSA : 1,
     lowSpeedCornerFrames: d.lowF,
-    frontReversalRate: (() => {
-      const s = Math.max(1, (d.lastT - d.firstT) / 1000);
-      return d.frontRev / s;
-    })(),
-    rearReversalRate: (() => {
-      const s = Math.max(1, (d.lastT - d.firstT) / 1000);
-      return d.rearRev / s;
-    })(),
+    frontReversalRate: d.frontRev / Math.max(1, durS),
+    rearReversalRate: d.rearRev / Math.max(1, durS),
     brakingFrames: d.brakingFrames,
     powerFrames: d.powerFrames,
     maxLatG: d.maxLatG,
@@ -498,6 +624,5 @@ export function summarize(d: SessionData): SessionSummary | null {
     highSpeedNearLimitFrac: d.hsCorner > 0 ? d.hsNearLimit / d.hsCorner : 0,
     highSpeedUndersteerRatio: d.hsRearSA > 0.001 ? d.hsFrontSA / d.hsRearSA : 1,
     tireTempAvg: { fl: avg("fl"), fr: avg("fr"), rl: avg("rl"), rr: avg("rr") },
-    tireTempMax: { ...d.tempMax },
   };
 }

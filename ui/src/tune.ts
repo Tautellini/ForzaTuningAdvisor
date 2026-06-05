@@ -71,6 +71,7 @@ export const TUNE_GROUPS: TuneGroup[] = [
     id: "tires",
     title: "Tires",
     icon: "🛞",
+    note: "Telemetry can't read pressure — entered values are checked against the active mode's recommended window; temps are a rough proxy.",
     fields: [
       { key: "frontPressure", label: "Front pressure", unit: pressureUnit },
       { key: "rearPressure", label: "Rear pressure", unit: pressureUnit },
@@ -81,7 +82,7 @@ export const TUNE_GROUPS: TuneGroup[] = [
     id: "alignment",
     title: "Alignment",
     icon: "📐",
-    note: "Camber is estimated from body roll (a starting point); toe/caster are guidance only.",
+    note: "Camber is estimated from body roll, toe from straight-line scrub (both starting points); caster is checked against the mode's window — telemetry can't measure it.",
     fields: [
       { key: "frontCamber", label: "Front camber", unit: deg },
       { key: "rearCamber", label: "Rear camber", unit: deg },
@@ -115,11 +116,13 @@ export const TUNE_GROUPS: TuneGroup[] = [
     title: "Damping",
     icon: "💧",
     note: "Only a low-confidence hint is possible from suspension motion.",
+    // Forza lists rebound above bump — same order here so transcribing
+    // from the in-game screen maps 1:1.
     fields: [
-      { key: "frontBump", label: "Front bump", unit: () => "" },
-      { key: "rearBump", label: "Rear bump", unit: () => "" },
       { key: "frontRebound", label: "Front rebound", unit: () => "" },
       { key: "rearRebound", label: "Rear rebound", unit: () => "" },
+      { key: "frontBump", label: "Front bump", unit: () => "" },
+      { key: "rearBump", label: "Rear bump", unit: () => "" },
     ],
   },
   {
@@ -154,16 +157,5 @@ export const TUNE_GROUPS: TuneGroup[] = [
   },
 ];
 
-const KEY = "fta.currentTune";
-
-export function loadTune(): CurrentTune {
-  try {
-    return JSON.parse(localStorage.getItem(KEY) ?? "{}") as CurrentTune;
-  } catch {
-    return {};
-  }
-}
-
-export function saveTune(t: CurrentTune) {
-  localStorage.setItem(KEY, JSON.stringify(t));
-}
+// Note: tunes are persisted per-car by the garage (see garage/store.ts).
+// The old global "fta.currentTune" key is consumed by garage/migrate.ts.

@@ -3,16 +3,111 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Forza Tuning Advisor — live telemetry tuning advice for Forza Horizon 6</title>
+    <meta
+      name="description"
+      content="Free, open-source tuning advisor for Forza Horizon 6. Reads the game's Data Out telemetry on your PC and turns it into concrete setup fixes: balance, gearing, brakes, differential and aero. No uploads — everything stays on your machine."
+    />
+    <link rel="canonical" href="https://tautellini.github.io/ForzaTuningAdvisor/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#0e0e10" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Forza Tuning Advisor" />
+    <meta property="og:title" content="Forza Tuning Advisor — live telemetry tuning advice for Forza Horizon 6" />
+    <meta
+      property="og:description"
+      content="Drive — your car's telemetry turns into concrete setup fixes. Balance, gearing, brakes, diff and aero, diagnosed from what the car actually does. Free, open source, local-only."
+    />
+    <meta property="og:url" content="https://tautellini.github.io/ForzaTuningAdvisor/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Forza Tuning Advisor — live tuning advice for Forza Horizon 6" />
+    <meta
+      name="twitter:description"
+      content="Telemetry-driven setup fixes for Forza Horizon 6. Free, open source, nothing leaves your PC."
+    />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,600;0,700;1,600;1,700&family=Titillium+Web:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <title>Forza Tuning Advisor</title>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "SoftwareApplication",
+            "name": "Forza Tuning Advisor",
+            "alternateName": "FTA",
+            "url": "https://tautellini.github.io/ForzaTuningAdvisor/",
+            "applicationCategory": "UtilitiesApplication",
+            "operatingSystem": "Windows 10, Windows 11",
+            "description": "Live tuning advisor for Forza Horizon 6: reads the game's Data Out telemetry locally and turns it into concrete setup advice for balance, gearing, brakes, differential and aero.",
+            "isAccessibleForFree": true,
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "softwareHelp": "https://github.com/Tautellini/ForzaTuningAdvisor"
+          },
+          {
+            "@type": "FAQPage",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Is my telemetry uploaded anywhere?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. The bridge binds to 127.0.0.1 only and all analysis runs in your browser. Telemetry never leaves your PC."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Why does it need a PowerShell script?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Browsers cannot receive UDP. Forza broadcasts telemetry as UDP packets, so a small readable PowerShell script (the bridge) parses them and hands them to the page over a local WebSocket. No install, no admin rights."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Does it modify the game?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. It only listens to the telemetry stream Forza itself offers (the Data Out setting). No game files are touched and nothing is injected."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What advice does it give?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Setup fixes grounded in measurements: under/oversteer balance split by corner phase, optimal shift points from your measured power curve, brake pressure and balance, differential, aero, springs and damping hints — per discipline (Road, Dirt, Offroad, Drift, Drag)."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Which platforms are supported?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "The game and the bridge must run on the same Windows PC. The bridge listens on localhost only, so a console cannot reach it."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <p style="font-family: sans-serif; padding: 24px">
+        Forza Tuning Advisor turns Forza Horizon 6 telemetry into live setup advice. It needs
+        JavaScript to run — or visit the project on
+        <a href="https://github.com/Tautellini/ForzaTuningAdvisor">GitHub</a>.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

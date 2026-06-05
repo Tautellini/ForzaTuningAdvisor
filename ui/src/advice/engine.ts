@@ -1,8 +1,16 @@
 import type { SessionSummary } from "../session";
 import type { CurrentTune } from "../tune";
 import type { DisciplineProfile } from "../discipline";
-import type { PriorityId } from "../priorities";
-import { lengthShort, pressureStep, pressureUnit, rideStep, tempC, type Units } from "../units";
+import {
+  lengthShort,
+  pressureRange,
+  pressureStep,
+  pressureUnit,
+  pressureVal,
+  rideStep,
+  tempC,
+  type Units,
+} from "../units";
 
 export type Confidence = "high" | "medium" | "low";
 export type AdviceKind = "fix" | "opportunity";
@@ -15,10 +23,11 @@ export type AdviceGroup =
   | "damping"
   | "aero"
   | "brakes"
-  | "diff"
-  | "general";
+  | "diff";
 
-function groupForId(id: string): AdviceGroup {
+// Every emitted id MUST resolve to a TUNE_GROUPS id here, or TuneSection
+// silently drops the card (it only renders the groups on the tune sheet).
+function groupForId(id: string): AdviceGroup | undefined {
   if (id.startsWith("gearing")) return "gearing";
   if (id.startsWith("camber") || id.startsWith("align") || id.startsWith("toe") || id.startsWith("caster"))
     return "alignment";
@@ -26,15 +35,17 @@ function groupForId(id: string): AdviceGroup {
   if (id.startsWith("brake")) return "brakes";
   if (id.startsWith("diff") || id.startsWith("drift") || id === "drag-launch") return "diff";
   if (id.startsWith("damping")) return "damping";
-  if (id.startsWith("bottoming") || id.startsWith("unload")) return "springs";
+  if (id.startsWith("bottoming") || id.startsWith("springs")) return "springs";
   if (id.startsWith("balance")) return "arb";
   if (id.startsWith("tire")) return "tires";
-  return "general";
+  return undefined;
 }
 
+// Every viz is self-labeling (numbers, units or words) — an unlabeled
+// percentage bar reads as a meaningless progress indicator, so there is none;
+// evidence fractions live in the card's why-text instead.
 export type AdviceViz =
   | { kind: "balance"; ratio: number } // front/rear slip ratio; 1 = neutral
-  | { kind: "bar"; value: number; tone: "spin" | "lock" | "warn" | "good" } // 0..1
   | { kind: "delta"; from: number | null; to: number; min: number; max: number; unit?: string }
   | { kind: "dir"; dir: "more" | "less"; label: string }
   | { kind: "gears"; unit: string; redline: number; gears: { g: number; speed: number; shift?: number }[] }
@@ -47,6 +58,14 @@ export interface Advice {
   kind: AdviceKind;
   group?: AdviceGroup; // assigned from id at return time
   field?: keyof CurrentTune; // the specific lever this targets (for ambiguous ids)
+  /**
+   * Step-snapped sheet values the Apply button writes. Single-sourced with the
+   * numbers shown in recommendation/viz so what you read is what lands in the
+   * sheet. Absent on directional-only cards (no absolute target).
+   */
+  apply?: Partial<CurrentTune>;
+  /** Pure sheet check (no telemetry) — stays live while the pool is stale. */
+  sheetOnly?: boolean;
   recommendation: string; // the action (includes concrete numbers when available)
   why: string; // evidence from the session data
   outcome: string; // expected result + trade-off
@@ -55,13 +74,38 @@ export interface Advice {
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 const cap = (x: string) => x[0].toUpperCase() + x.slice(1);
+// single-field apply payload (computed keys widen to a string index otherwise)
+const ap = (k: keyof CurrentTune, v: number): Partial<CurrentTune> =>
+  ({ [k]: v }) as Partial<CurrentTune>;
 const ord = (n: number) => (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
 const r0 = (x: number) => Math.round(x);
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
-const MIN = { frames: 120, gearPair: 2, braking: 20, cornering: 40, power: 30, curve: 4, hsCorner: 40 };
+// Minimum evidence before a rule may speak, in frames at the ~60 Hz feed.
+// Deliberately conservative: one full steering input is NOT "cornering data".
+// Think several corners, several braking zones, a full-throttle rev sweep —
+// the Coverage panel shows these same numbers as its "ready" bars.
+export const MIN = {
+  frames: 1800, // ~30s of actual driving before any advice at all
+  cornering: 600, // ~10s under real steering = a handful of corners
+  mid: 360, // ~6s coasting mid-corner (the cleanest balance signal)
+  phase: 180, // ~3s spent in one corner phase (entry / exit balance)
+  braking: 240, // ~4s of braking (any pressure) = several braking zones
+  locked: 40, // ~0.7s of actual wheel lock before the low-pedal verdict
+  straight: 300, // ~5s running straight at speed (toe-scrub estimate)
+  hardBrake: 180, // ~3s of >=50% pedal (brake-dive verdict)
+  hardPower: 240, // ~4s of >=80% throttle (power-squat verdict)
+  lifts: 8, // mid-corner throttle lifts before lift-off verdicts
+  power: 360, // ~6s on significant throttle (traction/diff verdicts)
+  curve: 12, // distinct rpm bins on the power curve = a real WOT sweep
+  hsCorner: 300, // ~5s of fast cornering (aero verdicts)
+  lowSpeed: 300, // ~5s of slow cornering (mechanical-vs-aero comparison)
+  hardCorner: 240, // ~4s above 0.5g lateral (camber-from-roll estimate)
+  damping: 1800, // oscillation *rate* needs time to stabilize
+  topGearWot: 120, // ~2s flat-out in top gear before the limiter verdict
+};
 
 function powerAt(curve: SessionSummary["powerCurve"], rpm: number): number {
   if (curve.length === 0) return 0;
@@ -135,16 +179,131 @@ export function analyzeSession(
   s: SessionSummary | null,
   tune: CurrentTune,
   p: DisciplineProfile,
-  priorities: PriorityId[],
   u: Units,
 ): Advice[] {
-  if (!s || s.drivingFrames < MIN.frames) return [];
   const out: Advice[] = [];
-  const rankOf = (id: PriorityId) => {
-    const i = priorities.indexOf(id);
-    return i < 0 ? 99 : i;
-  };
-  const topIs = (id: PriorityId, within = 2) => rankOf(id) < within;
+  const finish = () => out.map((a) => ({ ...a, group: groupForId(a.id) }));
+
+  // ---- Tires: entered pressure vs the discipline's window (sheet check) ----
+  // The feed has no pressure channel, so measured pressure advice is
+  // impossible. This instead checks the SHEET against the mode's window —
+  // the one rule that needs no telemetry, so it may fire before any driving.
+  const pressureFlagged = { front: false, rear: false };
+  for (const axle of ["front", "rear"] as const) {
+    const key = axle === "front" ? "frontPressure" : "rearPressure";
+    const cur = tune[key];
+    if (cur == null) continue;
+    const win = p.psiWindow[axle];
+    const lo = pressureVal(win[0], u);
+    const hi = pressureVal(win[1], u);
+    if (cur >= lo && cur <= hi) continue;
+    pressureFlagged[axle] = true;
+    const above = cur > hi;
+    const target = u.system === "imperial" ? r0(clamp(cur, lo, hi)) : r1(clamp(cur, lo, hi));
+    out.push({
+      id: `tire-pressure-${axle}`,
+      area: `${cap(axle)} tire pressure`,
+      confidence: p.id === "drift" ? "low" : "medium",
+      kind: "fix",
+      field: key,
+      sheetOnly: true,
+      apply: ap(key, target),
+      recommendation: `${cap(axle)} pressure ${cur} → ~${target} ${pressureUnit(u)}`,
+      why: `${p.label} runs best around ${pressureRange(win[0], win[1], u)}; your sheet says ${cur} ${pressureUnit(u)} — ${above ? "above" : "below"} that window. The feed can't measure pressure, so this checks the sheet against the discipline, not the tire.`,
+      outcome: above
+        ? "More compliance and a bigger contact patch where grip is loose or uneven. Trade-off: too low feels vague and overheats the carcass."
+        : "Less sidewall flex, crisper response, cooler tires. Trade-off: too high shrinks the contact patch.",
+      viz: {
+        kind: "delta",
+        from: cur,
+        to: target,
+        min: Math.min(cur, lo),
+        max: Math.max(cur, hi),
+        unit: pressureUnit(u),
+      },
+    });
+  }
+
+  // ---- Caster vs the discipline's floor (sheet check, like pressure) -------
+  // Caster has no telemetry signal at all; this is community knowledge.
+  if (p.rules.alignment && tune.caster != null && tune.caster < p.casterMin) {
+    const casterTarget = r1(Math.max(6, p.casterMin));
+    out.push({
+      id: "caster-low",
+      area: "Caster",
+      confidence: "medium",
+      kind: "fix",
+      field: "caster",
+      sheetOnly: true,
+      apply: { caster: casterTarget },
+      recommendation: `Caster ${r1(tune.caster)}° → ~${casterTarget}–7°`,
+      why: `High caster adds camber exactly when you steer and settles the car at speed — in Forza it's nearly free grip. ${p.label} setups run ${r1(p.casterMin)}°+ as a floor; your sheet says ${r1(tune.caster)}°. (No telemetry can measure caster — this checks the sheet.)`,
+      outcome:
+        "More mid-corner front grip and straight-line stability. Trade-off: marginally slower steering response near center.",
+      viz: { kind: "delta", from: tune.caster, to: casterTarget, min: 1, max: 7, unit: "°" },
+    });
+  }
+
+  // ---- ARBs vs loose surfaces (sheet check) ---------------------------------
+  // Telemetry can't separate ARB stiffness from springs, but maxed bars on a
+  // loose surface are a known mistake: the wheels must follow ruts and camber
+  // changes independently.
+  if (
+    (p.id === "dirt" || p.id === "offroad") &&
+    tune.frontARB != null &&
+    tune.rearARB != null &&
+    tune.frontARB >= 50 &&
+    tune.rearARB >= 50
+  ) {
+    out.push({
+      id: "balance-arb-stiff",
+      area: "Anti-roll bars",
+      confidence: "medium",
+      kind: "fix",
+      field: "frontARB",
+      sheetOnly: true,
+      apply: { frontARB: 20, rearARB: 20 }, // middle of the recommended band
+      recommendation: `Front ${r0(tune.frontARB)} / Rear ${r0(tune.rearARB)} → ~15–25 each`,
+      why: `${p.label} runs soft anti-roll bars: each wheel has to follow its own rut or camber change, and bars this stiff (${r0(tune.frontARB)}/${r0(tune.rearARB)} of 65) lift the inside wheel over every bump. (Sheet check — balance fine-tuning still comes from the measured cards.)`,
+      outcome:
+        "More contact patch and drive on rough ground. Trade-off: more body roll — that's normal off-road.",
+      viz: { kind: "dir", dir: "less", label: "ARB stiffness" },
+    });
+  }
+
+  // ---- Bump vs rebound relationship (sheet check) ---------------------------
+  // The well-established starting point is bump ≈ 60–70% of rebound; inverted
+  // or far-below values are flagged from the sheet alone.
+  if (p.rules.damping) {
+    for (const axle of ["front", "rear"] as const) {
+      const bumpKey = axle === "front" ? "frontBump" : "rearBump";
+      const reboundKey = axle === "front" ? "frontRebound" : "rearRebound";
+      const b = tune[bumpKey];
+      const rb = tune[reboundKey];
+      if (b == null || rb == null || rb <= 0) continue;
+      if (b <= rb + 0.5 && b >= rb * 0.4) continue; // within the sane band
+      const target = Math.max(1, r1(rb * 0.65));
+      out.push({
+        id: `damping-bump-${axle}`,
+        area: `${cap(axle)} bump damping`,
+        confidence: "medium",
+        kind: "fix",
+        field: bumpKey,
+        sheetOnly: true,
+        apply: ap(bumpKey, target),
+        recommendation: `${cap(axle)} bump ${r1(b)} → ~${target} (≈65% of your ${r1(rb)} rebound)`,
+        why:
+          b > rb + 0.5
+            ? `Bump is set stiffer than rebound (${r1(b)} vs ${r1(rb)}) — compression should be the softer of the pair: the spring needs to compress quickly over a bump, then the damper controls the slower return.`
+            : `Bump sits far below the usual ~60–70% of rebound (${r1(b)} vs ${r1(rb)}) — too little compression damping lets the chassis crash down onto its springs.`,
+        outcome:
+          "Settled, predictable response over bumps. A rule-of-thumb sheet check — fine-tune from there by feel.",
+        viz: { kind: "delta", from: b, to: target, min: 1, max: 20, unit: "" },
+      });
+    }
+  }
+
+  if (!s || s.drivingFrames < MIN.frames) return finish();
 
   // ---- Gearing: optimal shift points ---------------------------------------
   const gearNums = Object.keys(s.gears)
@@ -183,21 +342,28 @@ export function analyzeSession(
   if (
     p.rules.topGearLimiter &&
     topGear &&
-    s.gears[topGear].wot > 30 &&
+    s.gears[topGear].wot >= MIN.topGearWot &&
     s.gears[topGear].limiterFrac >= 0.15
   ) {
     const lengthen = clamp(s.gears[topGear].limiterFrac, 0.05, 0.12);
+    const topSpd =
+      u.system === "imperial"
+        ? `${r0(s.gears[topGear].maxSpeedKmh * 0.621371)} mph`
+        : `${r0(s.gears[topGear].maxSpeedKmh)} km/h`;
+    const fdTarget = tune.finalDrive != null ? r2(tune.finalDrive * (1 - lengthen)) : null;
     const rec =
-      tune.finalDrive != null
-        ? `Final drive ${r2(tune.finalDrive)} → ~${r2(tune.finalDrive * (1 - lengthen))}`
+      fdTarget != null
+        ? `Final drive ${r2(tune.finalDrive!)} → ~${fdTarget}`
         : `Lengthen top gear / final drive by ~${pct(lengthen)}`;
     out.push({
       id: "gearing-limiter-top",
       area: "Gearing — top end",
       confidence: "high",
       kind: "fix",
+      field: "finalDrive",
+      apply: fdTarget != null ? { finalDrive: fdTarget } : undefined,
       recommendation: rec,
-      why: `You sit on the rev limiter ${pct(s.gears[topGear].limiterFrac)} of full-throttle time in gear ${topGear} (topped out at ${r0(s.gears[topGear].maxSpeedKmh)} km/h) — the gearing runs out before the straight does.`,
+      why: `You sit on the rev limiter ${pct(s.gears[topGear].limiterFrac)} of full-throttle time in gear ${topGear} (topped out at ${topSpd}) — the gearing runs out before the straight does.`,
       outcome:
         "Higher top speed where straights are long. Trade-off: slightly slower final-gear acceleration. Net gain on power tracks, marginal on twisty ones.",
     });
@@ -210,11 +376,15 @@ export function analyzeSession(
     const full = N >= 3 && Array.from({ length: N }, (_, i) => ratios[i]).every((r) => Number.isFinite(r) && (r as number) > 0);
 
     if (full) {
-      const r1 = ratios[0] as number;
-      const rN = ratios[N - 1] as number;
-      if (r1 > rN) {
+      // NOTE: deliberately not named r1/rN — `r1` would shadow the rounding helper
+      const firstRatio = ratios[0] as number;
+      const lastRatio = ratios[N - 1] as number;
+      if (firstRatio > lastRatio) {
         // geometric progression between the (unchanged) 1st and top gears
-        const suggested = Array.from({ length: N }, (_, i) => r1 * Math.pow(rN / r1, i / (N - 1)));
+        const suggested = Array.from(
+          { length: N },
+          (_, i) => firstRatio * Math.pow(lastRatio / firstRatio, i / (N - 1)),
+        );
         const rows = suggested.map((sv, i) => ({
           g: i + 1,
           from: Math.round((ratios[i] as number) * 100) / 100,
@@ -227,6 +397,7 @@ export function analyzeSession(
             area: "Gearing — ratio spacing",
             confidence: "medium",
             kind: "fix",
+            apply: { gearRatios: rows.map((row) => row.to) },
             recommendation: "Even out the middle gears (keeps your 1st & top gear)",
             why: "Your middle gears are unevenly spaced, so some shifts drop the revs much more than others. A smooth (geometric) progression keeps each shift's RPM drop consistent — no single gear that bogs or over-revs.",
             outcome: "Consistent pull out of every gear. Trade-off: none — launch (1st) and top speed (top gear) are unchanged.",
@@ -269,9 +440,12 @@ export function analyzeSession(
       const key = useRear ? "rearDiffAccel" : "frontDiffAccel";
       const axle = useRear ? "rear" : "front";
       const cur = tune[key];
+      const to = cur != null ? r0(Math.max(clamp(cur - drop, 0, 100), p.diffAccelFloor)) : null;
       const rec =
         cur != null
-          ? `${axle[0].toUpperCase() + axle.slice(1)} diff acceleration ${r0(cur)}% → ~${r0(clamp(cur - drop, 0, 100))}%`
+          ? to! < cur
+            ? `${axle[0].toUpperCase() + axle.slice(1)} diff acceleration ${r0(cur)}% → ~${to}%`
+            : `Diff already open (${r0(cur)}%) — feed the throttle in more gradually instead`
           : `Lower ${axle} diff acceleration by ~${drop}%`;
       out.push({
         id: "drag-launch",
@@ -279,11 +453,11 @@ export function analyzeSession(
         confidence: "high",
         kind: "fix",
         field: key,
+        apply: cur != null && to! < cur ? ap(key, to!) : undefined,
         recommendation: `${rec}; drop tire pressure slightly for a bigger contact patch`,
         why: `The ${axle} wheels spin in ${pct(frac)} of on-power frames — that's wasted grip off the line.`,
         outcome:
           "Quicker launch and lower ET. Trade-off: go too soft and it bogs instead of spinning — dial to the edge of traction.",
-        viz: { kind: "bar", value: frac, tone: "spin" },
       });
     }
   }
@@ -299,6 +473,35 @@ export function analyzeSession(
     });
   }
 
+  // ---- Brakes: locking at LOW pedal = pressure is way too high -------------
+  // Measured from the pedal position at the moment wheels lock — no separate
+  // "trail braking" data needed (a pedal band never accumulates enough time).
+  let lowPedalLockCard = false;
+  if (
+    p.rules.brakes &&
+    s.brakingFrames >= MIN.braking &&
+    s.lockFrames >= MIN.locked &&
+    s.lockPedalAvg > 0 &&
+    s.lockPedalAvg <= 0.6
+  ) {
+    lowPedalLockCard = true;
+    const cur = tune.brakePressure;
+    const to = cur != null ? r0(clamp(cur - 12, 0, 100)) : null;
+    out.push({
+      id: "brake-partial-lock",
+      area: "Brake pressure",
+      confidence: "high",
+      kind: "fix",
+      field: "brakePressure",
+      apply: to != null ? { brakePressure: to } : undefined,
+      recommendation:
+        cur != null ? `Brake pressure ${r0(cur)}% → ~${to}%` : "Lower brake pressure ~12%",
+      why: `When your wheels lock, the pedal averages only ${pct(s.lockPedalAvg)} — if that little input already locks up, the system clamps far harder than the tires can take. That's a stronger signal than locking at a full stomp.`,
+      outcome:
+        "A usable pedal range for trail-braking and threshold control. Trade-off: very little — locking this early leaves no room to modulate.",
+    });
+  }
+
   // ---- Brakes: balance (with deadband) or overall pressure -----------------
   if (p.rules.brakes && s.brakingFrames >= MIN.braking) {
     const imbalance = s.frontLockFrac - s.rearLockFrac; // + = front locks more
@@ -309,15 +512,17 @@ export function analyzeSession(
         const front = imbalance > 0;
         const shift = clamp(r0(Math.abs(imbalance) * 15), 1, 6);
         const cur = tune.brakeBalance;
-        const to = cur != null ? clamp(cur + (front ? -shift : shift), 0, 100) : null;
+        const to = cur != null ? r0(clamp(cur + (front ? -shift : shift), 0, 100)) : null;
         out.push({
           id: front ? "brake-front-lock" : "brake-rear-lock",
           area: "Brake balance",
           confidence: "high",
           kind: "fix",
+          field: "brakeBalance",
+          apply: to != null ? { brakeBalance: to } : undefined,
           recommendation:
             cur != null
-              ? `Brake balance ${r0(cur)}% → ~${r0(to!)}% front`
+              ? `Brake balance ${r0(cur)}% → ~${to}% front`
               : `Move brake balance ~${shift}% ${front ? "rearward" : "forward"}`,
           why: `${front ? "Front" : "Rear"} wheels lock more under braking (${pct(s.frontLockFrac)} F vs ${pct(s.rearLockFrac)} R) — bias the brakes toward the axle that isn't locking. Small step on purpose, to avoid overshooting back the other way.`,
           outcome: front
@@ -326,24 +531,25 @@ export function analyzeSession(
           viz:
             cur != null
               ? { kind: "delta", from: cur, to: to!, min: 0, max: 100, unit: "% front" }
-              : { kind: "bar", value: front ? s.frontLockFrac : s.rearLockFrac, tone: "lock" },
+              : undefined,
         });
-      } else {
+      } else if (!lowPedalLockCard) {
         // both axles lock about equally — that's overall pressure, not balance
+        // (skipped when the low-pedal card already says so, louder)
         const cur = tune.brakePressure;
-        const to = cur != null ? clamp(cur - 8, 0, 100) : null;
+        const to = cur != null ? r0(clamp(cur - 8, 0, 100)) : null;
         out.push({
           id: "brake-pressure",
           area: "Brake pressure",
           confidence: "medium",
           kind: "fix",
           field: "brakePressure",
+          apply: to != null ? { brakePressure: to } : undefined,
           recommendation:
-            cur != null ? `Brake pressure ${r0(cur)}% → ~${r0(to!)}%` : "Lower brake pressure ~8%",
+            cur != null ? `Brake pressure ${r0(cur)}% → ~${to}%` : "Lower brake pressure ~8%",
           why: `Both axles lock about equally (${pct(s.frontLockFrac)} F / ${pct(s.rearLockFrac)} R) — that's too much overall braking force, not a front/rear balance issue. The balance is fine.`,
           outcome:
             "Less locking and better threshold-braking control. Trade-off: go too soft and stopping distances grow.",
-          viz: { kind: "bar", value: lockMax, tone: "lock" },
         });
       }
     }
@@ -360,41 +566,53 @@ export function analyzeSession(
     const axleCard = (axle: "front" | "rear", frac: number, key: "frontDiffAccel" | "rearDiffAccel") => {
       const drop = clamp(r0(frac * 30), 5, 20);
       const cur = tune[key];
+      // Floor per discipline: on loose surfaces wheelspin is the surface, not
+      // the diff — never ratchet the advice toward a fully open (0%) diff.
+      const to = cur != null ? r0(Math.max(clamp(cur - drop, 0, 100), p.diffAccelFloor)) : null;
+      if (cur != null && to! >= cur) return; // already at the floor — opening further won't help
       out.push({
         id: `diff-${axle}`,
         area: `Differential — ${axle}`,
         confidence: conf,
         kind: "fix",
+        field: key,
+        apply: to != null ? ap(key, to) : undefined,
         recommendation:
           cur != null
-            ? `${axle[0].toUpperCase() + axle.slice(1)} diff acceleration ${r0(cur)}% → ~${r0(clamp(cur - drop, 0, 100))}%`
-            : `Lower ${axle} diff acceleration by ~${drop}%`,
+            ? `${axle[0].toUpperCase() + axle.slice(1)} diff acceleration ${r0(cur)}% → ~${to}%`
+            : `Lower ${axle} diff acceleration by ~${drop}% (not below ~${p.diffAccelFloor}% for ${p.label.toLowerCase()})`,
         why: `The ${axle} wheels spin in ${pct(frac)} of on-power frames — more than ideal for ${p.label.toLowerCase()}.`,
         outcome: `Cleaner ${axle} drive off corners. Trade-off: too low and the inside ${axle} wheel spins on power — find where it just hooks.`,
         viz:
           cur != null
-            ? { kind: "delta", from: cur, to: clamp(cur - drop, 0, 100), min: 0, max: 100, unit: "%" }
-            : { kind: "bar", value: frac, tone: "spin" },
+            ? { kind: "delta", from: cur, to: to!, min: 0, max: 100, unit: "%" }
+            : undefined,
       });
     };
 
     if (frontDriven && s.frontSpinFrac >= thr) axleCard("front", s.frontSpinFrac, "frontDiffAccel");
     if (rearDriven && s.rearSpinFrac >= thr) axleCard("rear", s.rearSpinFrac, "rearDiffAccel");
 
-    // AWD center balance when one axle spins notably more than the other
-    if (dt === 2 && (s.frontSpinFrac >= thr || s.rearSpinFrac >= thr)) {
+    // AWD center balance when one axle spins notably more than the other.
+    // Gated on the RELATIVE imbalance only — on loose surfaces both axles can
+    // sit below the absolute wheelspin threshold while one still works much
+    // harder than the other, and that's exactly what the center diff fixes.
+    if (dt === 2) {
       const diff = s.frontSpinFrac - s.rearSpinFrac;
       if (Math.abs(diff) >= 0.08) {
         const toRear = diff > 0; // front spins more -> push torque rearward
         const cur = tune.centerBalance;
+        const to = cur != null ? r0(clamp(cur + (toRear ? 5 : -5), 0, 100)) : null;
         out.push({
           id: "diff-center",
           area: "Differential — center balance",
           confidence: "medium",
           kind: "fix",
+          field: "centerBalance",
+          apply: to != null ? { centerBalance: to } : undefined,
           recommendation:
             cur != null
-              ? `Center balance ${r0(cur)}% rear → ~${r0(clamp(cur + (toRear ? 5 : -5), 0, 100))}% rear`
+              ? `Center balance ${r0(cur)}% rear → ~${to}% rear`
               : `Shift center balance ~5% ${toRear ? "rearward" : "frontward"}`,
           why: `The ${toRear ? "front" : "rear"} axle spins more (${pct(s.frontSpinFrac)} F vs ${pct(s.rearSpinFrac)} R) — send torque toward the axle that still has grip.`,
           outcome: `More balanced drive out of corners. Trade-off: too far ${toRear ? "rearward makes it looser on power" : "frontward makes it push on power"}.`,
@@ -412,21 +630,102 @@ export function analyzeSession(
         const action = p.preferHigherRide
           ? `Stiffen ${end} springs (keep the height for the terrain)`
           : `Raise ${end} ride height, or stiffen ${end} springs ~10%`;
+        const rhTarget =
+          tune[rhKey] != null && !p.preferHigherRide ? r1(tune[rhKey]! + rideStep(u)) : null;
         const rec =
-          tune[rhKey] != null && !p.preferHigherRide
-            ? `${end[0].toUpperCase() + end.slice(1)} ride height ${r1(tune[rhKey]!)} → ~${r1(tune[rhKey]! + rideStep(u))} ${lengthShort(u)}`
+          rhTarget != null
+            ? `${end[0].toUpperCase() + end.slice(1)} ride height ${r1(tune[rhKey]!)} → ~${rhTarget} ${lengthShort(u)}`
             : action;
         out.push({
           id: `bottoming-${end}`,
           area: "Springs / Ride height",
           confidence: "high",
           kind: "fix",
+          // the lever the card actually recommends: springs when terrain wants
+          // the height kept, ride height otherwise
+          field: p.preferHigherRide ? (end === "front" ? "frontSprings" : "rearSprings") : rhKey,
+          apply: rhTarget != null ? ap(rhKey, rhTarget) : undefined,
           recommendation: rec,
           why: `The ${end} suspension is fully compressed ${pct(s.bottoming[end])} of the time — it's hitting the bump stops, which causes sudden grip loss over bumps and kerbs.`,
           outcome: p.preferHigherRide
             ? "Soaks up the hits without bottoming. Trade-off: a stiffer end has slightly less mechanical grip."
             : "Stops the harsh bottoming. Trade-off: raising height lifts the CoG a touch (minor at this scale).",
-          viz: { kind: "bar", value: s.bottoming[end], tone: "warn" },
+        });
+        break;
+      }
+    }
+  }
+
+  // ---- Springs: brake dive & power squat (pitch control) -------------------
+  // Deep (not bottomed) travel under longitudinal load = soft for the build.
+  // Off-road setups WANT deep travel, so these run on tarmac modes only.
+  if (p.rules.bottoming && !p.preferHigherRide && p.id !== "drift") {
+    if (s.hardBrakeFrames >= MIN.hardBrake && s.diveFrac >= 0.4 && s.bottoming.front < p.thr.bottoming) {
+      const cur = tune.frontSprings;
+      const to = cur != null ? r1(cur * 1.1) : null;
+      out.push({
+        id: "springs-dive",
+        area: "Front springs — brake dive",
+        confidence: "medium",
+        kind: "fix",
+        field: "frontSprings",
+        apply: to != null ? { frontSprings: to } : undefined,
+        recommendation:
+          cur != null
+            ? `Front springs ${r1(cur)} → ~${to} ${u.springs} (+10%)`
+            : "Stiffen front springs ~10% (or add a little front bump damping)",
+        why: `Under hard braking the front sits at ≥85% of its travel in ${pct(s.diveFrac)} of frames — the nose dives deep, which wanders the brake balance and delays turn-in.`,
+        outcome:
+          "A steadier platform into corners and more consistent braking. Trade-off: slightly less compliance over bumps.",
+      });
+    }
+    if (s.hardPowerFrames >= MIN.hardPower && s.squatFrac >= 0.4 && s.bottoming.rear < p.thr.bottoming) {
+      const cur = tune.rearSprings;
+      const to = cur != null ? r1(cur * 1.1) : null;
+      out.push({
+        id: "springs-squat",
+        area: "Rear springs — power squat",
+        confidence: "medium",
+        kind: "fix",
+        field: "rearSprings",
+        apply: to != null ? { rearSprings: to } : undefined,
+        recommendation:
+          cur != null
+            ? `Rear springs ${r1(cur)} → ~${to} ${u.springs} (+10%)`
+            : "Stiffen rear springs ~10%",
+        why: `On hard throttle the rear sits at ≥85% of its travel in ${pct(s.squatFrac)} of frames — heavy squat lightens the nose, which costs steering on corner exit.`,
+        outcome:
+          "Less squat, more front grip on exit. Trade-off: a touch less rear traction off the line — some squat is useful for launch.",
+      });
+    }
+  }
+
+  // ---- Suspension topping out: wheels hang at full extension ---------------
+  // Hitting full extension also flips the travel direction, inflating the
+  // oscillation rate below — so an axle with a top-out card skips the
+  // (contradictory, lower-confidence) "raise rebound" oscillation card.
+  const toppedOut = { front: false, rear: false };
+  if (p.rules.topping) {
+    for (const end of ["front", "rear"] as const) {
+      if (s.topping[end] >= p.thr.topping) {
+        toppedOut[end] = true;
+        const key = end === "front" ? "frontRebound" : "rearRebound";
+        const cur = tune[key];
+        const to = cur != null ? Math.max(1, r1(cur - 2)) : null;
+        out.push({
+          id: `damping-topout-${end}`,
+          area: `${cap(end)} suspension — tops out`,
+          confidence: "medium",
+          kind: "fix",
+          field: key,
+          apply: to != null ? ap(key, to) : undefined,
+          recommendation:
+            cur != null
+              ? `${cap(end)} rebound ${cur} → ${to} (softer), or soften ${end} springs`
+              : `Soften ${end} rebound a step or two (or soften ${end} springs)`,
+          why: `The ${end} suspension sits at FULL extension ${pct(s.topping[end])} of the time — the wheels hang in the air instead of following the road, so they carry no grip in that moment.`,
+          outcome:
+            "The tires stay planted over crests and unloading corners. Trade-off: too soft rebound lets the body float.",
         });
         break;
       }
@@ -434,17 +733,20 @@ export function analyzeSession(
   }
 
   // ---- Mid-corner balance: under / oversteer (cleanest balance signal) ------
-  if (p.rules.balance && s.midFrames >= MIN.cornering) {
+  if (p.rules.balance && s.midFrames >= MIN.mid) {
     if (s.midUndersteer >= p.thr.understeerHigh) {
       const step = clamp(r0((s.midUndersteer - 1) * 14), 3, 22);
+      const to = tune.frontARB != null ? r0(clamp(tune.frontARB - step, 1, 65)) : null;
       out.push({
         id: "balance-understeer",
         area: "Mid-corner balance",
         confidence: "medium",
         kind: "fix",
+        field: "frontARB",
+        apply: to != null ? { frontARB: to } : undefined,
         recommendation:
           tune.frontARB != null
-            ? `Front ARB ${r0(tune.frontARB)} → ~${r0(clamp(tune.frontARB - step, 1, 65))} (−${step})`
+            ? `Front ARB ${r0(tune.frontARB)} → ~${to} (−${step})`
             : `Soften front ARB by ~${step} (or stiffen rear)`,
         why: `Mid-corner your front slip angle is ≈ ${r1(s.midUndersteer)}× the rear — the front gives up first, so the car pushes wide.`,
         outcome:
@@ -454,14 +756,17 @@ export function analyzeSession(
     } else if (s.midUndersteer > 0 && s.midUndersteer <= p.thr.oversteerLow) {
       const ratio = 1 / s.midUndersteer;
       const step = clamp(r0((ratio - 1) * 14), 3, 22);
+      const to = tune.frontARB != null ? r0(clamp(tune.frontARB + step, 1, 65)) : null;
       out.push({
         id: "balance-oversteer",
         area: "Mid-corner balance",
         confidence: "medium",
         kind: "fix",
+        field: "frontARB",
+        apply: to != null ? { frontARB: to } : undefined,
         recommendation:
           tune.frontARB != null
-            ? `Front ARB ${r0(tune.frontARB)} → ~${r0(clamp(tune.frontARB + step, 1, 65))} (+${step})`
+            ? `Front ARB ${r0(tune.frontARB)} → ~${to} (+${step})`
             : `Stiffen front ARB by ~${step} (or soften rear)`,
         why: `Mid-corner your rear slip angle is ≈ ${r1(ratio)}× the front — the rear lets go first, making the car loose.`,
         outcome:
@@ -472,36 +777,81 @@ export function analyzeSession(
   }
 
   // ---- Corner-phase balance: entry (braking) & exit (on power) -------------
-  if (p.rules.balance && s.entryFrames >= 30 && s.entryUndersteer <= p.thr.oversteerLow) {
-    out.push({
-      id: "balance-entry-oversteer",
-      area: "Entry — loose under braking",
-      confidence: "medium",
-      kind: "fix",
-      recommendation: "Add a little rear toe-in, move brake balance forward, or soften rear decel diff.",
-      why: `Under braking & turn-in the rear slips ≈ ${r1(1 / s.entryUndersteer)}× the front — the back steps out on entry.`,
-      outcome: "Calmer, more confident turn-in. Trade-off: a touch less rotation into the corner.",
-      viz: { kind: "balance", ratio: s.entryUndersteer },
-    });
+  // `> 0` mirrors the mid-corner gate; Math.max guards the 1/x display ratio.
+  if (p.rules.balance && s.entryFrames >= MIN.phase) {
+    const rearDriven = s.car.drivetrain !== 0;
+    const frontDriven = s.car.drivetrain !== 1;
+    if (s.entryUndersteer > 0 && s.entryUndersteer <= p.thr.oversteerLow) {
+      // Loose on entry. For a driven rear axle, MORE decel lock couples the
+      // rear wheels under engine braking and steadies it (same lever as the
+      // lift-off card — raising, never softening).
+      const cur = rearDriven ? tune.rearDiffDecel : undefined;
+      const to = rearDriven && cur != null ? r0(clamp(cur + 12, 0, 100)) : null;
+      out.push({
+        id: rearDriven ? "diff-entry-oversteer" : "balance-entry-oversteer",
+        area: "Entry — loose under braking",
+        confidence: "medium",
+        kind: "fix",
+        field: rearDriven ? "rearDiffDecel" : undefined,
+        apply: to != null ? { rearDiffDecel: to } : undefined,
+        recommendation: rearDriven
+          ? cur != null
+            ? `Rear diff deceleration ${r0(cur)}% → ~${to}%`
+            : "Raise rear diff deceleration ~10–15% (or add rear toe-in / move brake balance forward)"
+          : "Add a little rear toe-in, or move brake balance forward.",
+        why: `Under braking & turn-in the rear slips ≈ ${r1(1 / Math.max(s.entryUndersteer, 0.01))}× the front — the back steps out on entry.`,
+        outcome: "Calmer, more confident turn-in. Trade-off: a touch less rotation into the corner.",
+        viz:
+          to != null && cur != null
+            ? { kind: "delta", from: cur, to, min: 0, max: 100, unit: "%" }
+            : { kind: "balance", ratio: s.entryUndersteer },
+      });
+    } else if (frontDriven && s.entryUndersteer >= p.thr.understeerHigh) {
+      // Pushes on entry with a driven front axle: a locked front under engine
+      // braking resists turning — free the front decel so it rotates in.
+      const cur = tune.frontDiffDecel;
+      const to = cur != null ? r0(clamp(cur - 10, 0, 100)) : null;
+      out.push({
+        id: "diff-front-decel",
+        area: "Entry — pushes under braking",
+        confidence: "medium",
+        kind: "fix",
+        field: "frontDiffDecel",
+        apply: to != null ? { frontDiffDecel: to } : undefined,
+        recommendation:
+          cur != null
+            ? `Front diff deceleration ${r0(cur)}% → ~${to}%`
+            : "Lower front diff deceleration ~10%",
+        why: `Trail-braking into corners the front slips ≈ ${r1(s.entryUndersteer)}× the rear — a locked front axle under engine braking resists turning in.`,
+        outcome:
+          "Sharper turn-in while braking. Trade-off: a touch less front-end stability on straight-line lifts.",
+        viz:
+          cur != null && to != null
+            ? { kind: "delta", from: cur, to, min: 0, max: 100, unit: "%" }
+            : { kind: "balance", ratio: s.entryUndersteer },
+      });
+    }
   }
-  if (p.rules.balance && s.exitFrames >= 30) {
-    if (s.exitUndersteer <= p.thr.oversteerLow) {
+  if (p.rules.balance && s.exitFrames >= MIN.phase) {
+    if (s.exitUndersteer > 0 && s.exitUndersteer <= p.thr.oversteerLow) {
       const cur = tune.rearDiffAccel;
+      const to = cur != null ? r0(clamp(cur - 8, 0, 100)) : null;
       out.push({
         id: "diff-exit-oversteer",
         area: "Exit — power oversteer",
         confidence: "medium",
         kind: "fix",
         field: "rearDiffAccel",
+        apply: to != null ? { rearDiffAccel: to } : undefined,
         recommendation:
           cur != null
-            ? `Rear diff acceleration ${r0(cur)}% → ~${r0(clamp(cur - 8, 0, 100))}%`
+            ? `Rear diff acceleration ${r0(cur)}% → ~${to}%`
             : "Soften diff acceleration (or soften rear springs)",
-        why: `On corner exit (on power) the rear slips ≈ ${r1(1 / s.exitUndersteer)}× the front — it gets loose as you pick up the throttle.`,
+        why: `On corner exit (on power) the rear slips ≈ ${r1(1 / Math.max(s.exitUndersteer, 0.01))}× the front — it gets loose as you pick up the throttle.`,
         outcome: "Cleaner power-down on exit. Trade-off: a touch less rotation on throttle.",
         viz:
-          cur != null
-            ? { kind: "delta", from: cur, to: clamp(cur - 8, 0, 100), min: 0, max: 100, unit: "%" }
+          cur != null && to != null
+            ? { kind: "delta", from: cur, to, min: 0, max: 100, unit: "%" }
             : { kind: "balance", ratio: s.exitUndersteer },
       });
     } else if (s.exitUndersteer >= p.thr.understeerHigh) {
@@ -518,8 +868,34 @@ export function analyzeSession(
     }
   }
 
+  // ---- Lift-off oversteer: throttle lifts mid-corner -> decel diff ---------
+  if (p.rules.balance && s.liftEvents >= MIN.lifts && s.liftOversteerFrac >= 0.3) {
+    const rearDriven = s.car.drivetrain !== 0; // RWD or AWD
+    const cur = tune.rearDiffDecel;
+    const to = rearDriven && cur != null ? r0(clamp(cur + 12, 0, 100)) : null;
+    out.push({
+      id: "diff-liftoff",
+      area: "Lift-off oversteer",
+      confidence: "medium",
+      kind: "fix",
+      field: rearDriven ? "rearDiffDecel" : undefined,
+      apply: to != null ? { rearDiffDecel: to } : undefined,
+      recommendation: rearDriven
+        ? cur != null
+          ? `Rear diff deceleration ${r0(cur)}% → ~${to}%`
+          : "Raise rear diff deceleration ~10–15% (or soften rear rebound)"
+        : "Soften the rear ARB a touch, or add a little rear toe-in",
+      why: `In ${pct(s.liftOversteerFrac)} of your ${s.liftEvents} mid-corner throttle lifts, the rear stepped out right after the lift — classic lift-off oversteer.`,
+      outcome:
+        "The car stays settled when you breathe off the throttle mid-corner. Trade-off: more decel lock adds a touch of entry understeer.",
+      viz: { kind: "dir", dir: "more", label: rearDriven ? "decel lock" : "rear stability" },
+    });
+  }
+
   // ---- Aero: downforce level + front/rear balance --------------------------
   if (p.rules.aero && s.highSpeedCornerFrames >= MIN.hsCorner) {
+    // the session's high-speed split is 30 m/s — phrase it in the user's units
+    const fastSpd = u.system === "imperial" ? ">67 mph" : ">108 km/h";
     if (s.highSpeedNearLimitFrac >= 0.5) {
       let balance = "";
       if (s.highSpeedUndersteerRatio >= p.thr.understeerHigh) balance = " — bias it forward (more front aero)";
@@ -530,22 +906,19 @@ export function analyzeSession(
         confidence: "medium",
         kind: "fix",
         recommendation: `Add downforce at both ends${balance}.`,
-        why: `You're at the grip limit in ${pct(s.highSpeedNearLimitFrac)} of fast corners (>108 km/h), peaking around ${r1(s.maxLatG)}g${balance ? "; and the balance is off at speed" : ""}.`,
+        why: `You're at the grip limit in ${pct(s.highSpeedNearLimitFrac)} of fast corners (${fastSpd}), peaking around ${r1(s.maxLatG)}g${balance ? "; and the balance is off at speed" : ""}.`,
         outcome:
           "More high-speed grip and stability through fast corners. Trade-off: more drag, so a little less top speed.",
         viz: { kind: "dir", dir: "more", label: "downforce" },
       });
     } else if (s.highSpeedNearLimitFrac < 0.25) {
       // Grip headroom at speed = unused downforce you can trade for top speed.
-      const speedFirst = topIs("topSpeed") || topIs("lapTime");
       out.push({
         id: "aero-reduce",
         area: "Aero",
         confidence: "low",
         kind: "opportunity",
-        recommendation: speedFirst
-          ? "Reduce downforce for more top speed — you've got grip to spare in fast corners."
-          : "Trade some downforce for top speed — you've got grip to spare in fast corners.",
+        recommendation: "Trade some downforce for top speed — you've got grip to spare in fast corners.",
         why: `You only reach the grip limit in ${pct(s.highSpeedNearLimitFrac)} of fast corners (peak ${r1(s.maxLatG)}g) — that's aero grip you're not using, and the wing is costing you drag.`,
         outcome:
           "Higher top speed and better straight-line lap time. Trade-off: less margin in fast corners — back it off gradually and re-check.",
@@ -554,7 +927,7 @@ export function analyzeSession(
     }
 
     // Mechanical vs aero: balance that's fine slow but off fast = an aero-balance issue.
-    if (s.lowSpeedCornerFrames >= 40 && s.highSpeedCornerFrames >= MIN.hsCorner) {
+    if (s.lowSpeedCornerFrames >= MIN.lowSpeed && s.highSpeedCornerFrames >= MIN.hsCorner) {
       const hi = s.highSpeedUndersteerRatio;
       const lo = s.lowSpeedUndersteer;
       if (hi >= 1.2 && hi >= lo * 1.3) {
@@ -584,9 +957,10 @@ export function analyzeSession(
   }
 
   // ---- Damping: oscillation -> rebound (low confidence, capped) ------------
-  if (p.rules.damping && s.drivingFrames >= 400) {
+  if (p.rules.damping && s.drivingFrames >= MIN.damping) {
     const DAMP_MAX = 20;
     const dampCard = (axle: "front" | "rear", rate: number, key: "frontRebound" | "rearRebound") => {
+      if (toppedOut[axle]) return; // top-out explains the reversals AND wants softer rebound
       if (rate < 3.5) return; // higher bar so it doesn't fire on normal bumps
       const cur = tune[key];
       if (cur != null && cur >= DAMP_MAX - 0.5) {
@@ -596,19 +970,21 @@ export function analyzeSession(
           area: `${cap(axle)} damping`,
           confidence: "low",
           kind: "fix",
+          field: key,
           recommendation: `${cap(axle)} rebound is already maxed (${cur}) — if it still bounces, stiffen ${axle} springs instead`,
           why: `The ${axle} still oscillates ~${rate.toFixed(1)}×/s with rebound at max, so adding damping won't help — the ${axle} springs are likely too soft. (Low confidence; rough surfaces inflate this.)`,
           outcome: "Stiffer springs settle the platform without maxing damping. Trade-off: slightly less mechanical grip.",
-          viz: { kind: "bar", value: clamp(rate / 6, 0, 1), tone: "warn" },
         });
         return;
       }
-      const to = cur != null ? Math.min(DAMP_MAX, cur + 2) : null;
+      const to = cur != null ? Math.min(DAMP_MAX, r1(cur + 2)) : null;
       out.push({
         id: `damping-${axle}`,
         area: `${cap(axle)} damping`,
         confidence: "low",
         kind: "fix",
+        field: key,
+        apply: to != null ? ap(key, to) : undefined,
         recommendation:
           cur != null
             ? `${cap(axle)} rebound ${cur} → ${to}`
@@ -619,7 +995,7 @@ export function analyzeSession(
         viz:
           cur != null
             ? { kind: "delta", from: cur, to: to!, min: 1, max: DAMP_MAX, unit: "" }
-            : { kind: "bar", value: clamp(rate / 6, 0, 1), tone: "warn" },
+            : undefined,
       });
     };
     dampCard("front", s.frontReversalRate, "frontRebound");
@@ -627,7 +1003,7 @@ export function analyzeSession(
   }
 
   // ---- Alignment: camber from body roll (medium); toe/caster tip (low) -----
-  if (p.rules.alignment && s.hardCornerFrames >= 30) {
+  if (p.rules.alignment && s.hardCornerFrames >= MIN.hardCorner) {
     const camberCard = (
       axle: "front" | "rear",
       rollDeg: number,
@@ -641,6 +1017,8 @@ export function analyzeSession(
         area: `${cap(axle)} camber`,
         confidence: "medium",
         kind: "fix",
+        field: key,
+        apply: ap(key, target), // target exists even with no entered value
         recommendation:
           cur != null
             ? `${cap(axle)} camber ${cur}° → ~${target.toFixed(1)}°`
@@ -655,18 +1033,57 @@ export function analyzeSession(
     camberCard("rear", s.rearRollDeg, "rearCamber");
   }
 
+  // ---- Alignment: toe scrub measured on the straights -----------------------
+  // Static toe shows up as a constant per-axle slip angle while running dead
+  // straight — wasted drag and heat. Low confidence: road crown and surface
+  // noise inflate it, and the sign (in vs out) isn't observable.
+  if (p.rules.alignment && s.straightFrames >= MIN.straight) {
+    const toeCard = (axle: "front" | "rear", scrubDeg: number, key: "frontToe" | "rearToe") => {
+      if (scrubDeg < 0.7) return;
+      const cur = tune[key];
+      // sheet says ~zero toe — then the scrub is road crown/noise, not toe
+      if (cur != null && Math.abs(cur) < 0.2) return;
+      const to = cur != null ? r1(cur > 0 ? Math.min(cur, 0.1) : Math.max(cur, -0.1)) : null;
+      out.push({
+        id: `toe-${axle}`,
+        area: `${cap(axle)} toe`,
+        confidence: "low",
+        kind: "fix",
+        field: key,
+        apply: to != null ? ap(key, to) : undefined,
+        recommendation:
+          to != null
+            ? `${cap(axle)} toe ${r1(cur!)}° → ~${to}° (toward zero)`
+            : `Reduce ${axle} toe toward 0°`,
+        why: `Running dead straight the ${axle} tires still hold ≈ ${scrubDeg.toFixed(1)}° of slip angle — that's toe scrub: constant drag and heat with no cornering benefit at this magnitude.`,
+        outcome:
+          axle === "rear"
+            ? "Less drag and cooler rears. Trade-off: rear toe-in adds stability — keep ~0.1–0.2° if the car gets nervous."
+            : "Less drag, cooler fronts, better top speed. Trade-off: a little front toe-out aids turn-in — don't chase exactly zero if turn-in suffers.",
+      });
+    };
+    toeCard("front", s.frontScrubDeg, "frontToe");
+    toeCard("rear", s.rearScrubDeg, "rearToe");
+  }
+
   // ---- Drift: maximize controllable oversteer ------------------------------
   if (p.rules.drift && s.corneringFrames >= MIN.cornering) {
     if (s.understeerRatio >= p.thr.understeerHigh) {
-      const rec =
+      const to =
         tune.rearDiffAccel != null && tune.rearDiffAccel < 90
-          ? `Rear diff acceleration ${r0(tune.rearDiffAccel)}% → ~${r0(clamp(tune.rearDiffAccel + 15, 0, 100))}%`
+          ? r0(clamp(tune.rearDiffAccel + 15, 0, 100))
+          : null;
+      const rec =
+        to != null
+          ? `Rear diff acceleration ${r0(tune.rearDiffAccel!)}% → ~${to}%`
           : `Lock diff toward 90–100%; stiffen front ARB / soften rear`;
       out.push({
         id: "drift-rotation-low",
         area: "Drift — rotation",
         confidence: "medium",
         kind: "fix",
+        field: to != null ? "rearDiffAccel" : undefined,
+        apply: to != null ? { rearDiffAccel: to } : undefined,
         recommendation: rec,
         why: `Front slip angle is ≈ ${r1(s.understeerRatio)}× the rear — the car grips at the front instead of rotating, so it won't hold a slide.`,
         outcome:
@@ -687,36 +1104,36 @@ export function analyzeSession(
   }
 
   // ---- Tire temperature window (proxy, no pressure data) -------------------
+  // Skipped for an axle whose sheet pressure is already outside the window:
+  // that card subsumes this one (and over-inflation overheats tires too, so
+  // "raise pressure" would be the wrong call there).
   if (p.rules.tireTemp) {
     const hot = (["fl", "fr", "rl", "rr"] as const).filter((k) => s.tireTempAvg[k] >= p.thr.hotTire);
-    if (hot.length > 0) {
+    if (hot.length > 0 && !pressureFlagged[hot.some((k) => k.startsWith("f")) ? "front" : "rear"]) {
       const frontHot = hot.some((k) => k.startsWith("f"));
       const pKey = frontHot ? "frontPressure" : "rearPressure";
       const pUnit = pressureUnit(u);
+      // A hot tire flexes too much for its load — RAISING pressure reduces the
+      // flex (and the heat it generates). Lowering it would run even hotter.
+      const to = tune[pKey] != null ? r1(tune[pKey]! + pressureStep(u)) : null;
       const rec =
-        tune[pKey] != null
-          ? `${frontHot ? "Front" : "Rear"} pressure ${r1(tune[pKey]!)} → try ~${r1(tune[pKey]! - pressureStep(u))} ${pUnit}`
-          : `Ease the load on ${hot.map((k) => k.toUpperCase()).join(", ")} (softer that end, or smoother inputs)`;
+        to != null
+          ? `${frontHot ? "Front" : "Rear"} pressure ${r1(tune[pKey]!)} → try ~${to} ${pUnit}`
+          : `Ease the load on ${hot.map((k) => k.toUpperCase()).join(", ")} (a touch more pressure, softer that end, or smoother inputs)`;
       out.push({
         id: "tire-hot",
         area: "Tires (temperature)",
         confidence: "low",
         kind: "fix",
         field: frontHot ? "frontPressure" : "rearPressure",
+        apply: to != null ? ap(pKey, to) : undefined,
         recommendation: rec,
-        why: `${hot.map((k) => { const tc = tempC(s.tireTempAvg[k], u); return `${k.toUpperCase()} avg ${r0(tc.v)}${tc.unit}`; }).join(", ")} — those tires run hottest, so they're working hardest.`,
+        why: `${hot.map((k) => { const tc = tempC(s.tireTempAvg[k], u); return `${k.toUpperCase()} avg ${r0(tc.v)}${tc.unit}`; }).join(", ")} — those tires run hottest, so they're working hardest. More pressure means less carcass flex, which is where the heat comes from.`,
         outcome:
-          "Cooler, more consistent tires. Note: the feed can't read pressure, so this is a hint, not a measured value.",
-        viz: {
-          kind: "bar",
-          value: clamp((Math.max(...hot.map((k) => s.tireTempAvg[k])) - 150) / 110, 0, 1),
-          tone: "warn",
-        },
+          "Cooler, more consistent tires. Trade-off: a slightly smaller contact patch — and the feed can't read pressure, so this is a hint, not a measured value.",
       });
     }
   }
 
-  return out.map((a) => ({ ...a, group: groupForId(a.id) }));
+  return finish();
 }
-
-export const CONFIDENCE_RANK: Record<Confidence, number> = { high: 0, medium: 1, low: 2 };

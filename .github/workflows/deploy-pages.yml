@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "ui/**"
+      - "bridge/powershell/bridge.ps1" # served as a download by the entry page
+      - "scripts/copy-bridge.mjs"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 

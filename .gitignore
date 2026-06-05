@@ -23,3 +23,6 @@ node_modules/
 # Tooling
 .claude/settings.local.json
 *.tsbuildinfo
+
+# Generated at build time by scripts/copy-bridge.mjs
+ui/public/bridge.ps1

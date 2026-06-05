@@ -34,16 +34,18 @@ export function PowerCurveChart({ summary, liveRpm }: Props) {
       : "";
 
   return (
-    <div className="viz-card">
-      <div className="viz-head">
-        <h3>Gearing — power curve</h3>
+    <div className="cov-diagram">
+      <div className="cov-diagram-head">
+        <h4>Gearing — power curve</h4>
+        <span className="viz-sub">
+          {g.hasCurve ? `peak ~${g.peakPowerRpm.toLocaleString()} rpm` : "no curve yet"}
+        </span>
         <div className="viz-legend">
           <span className="lg lg-power">power</span>
           <span className="lg lg-torque">torque</span>
           <span className="lg lg-shift">shift</span>
         </div>
       </div>
-
       {curve.length < 4 ? (
         <div className="viz-empty">Drive at full throttle through the rev range to map your power curve.</div>
       ) : (
