@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" font-family="Chakra Petch, Segoe UI, system-ui, sans-serif">
+  <defs>
+    <clipPath id="frame">
+      <rect width="1200" height="320" rx="18"/>
+    </clipPath>
+    <linearGradient id="hairline" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fb923c"/>
+      <stop offset="0.28" stop-color="#fb923c" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#38bdf8" stop-opacity="0.45"/>
+      <stop offset="0.85" stop-color="#38bdf8" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="stripe" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fb923c"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- panel -->
+  <rect x="0.5" y="0.5" width="1199" height="319" rx="18" fill="#0e0e10" stroke="#2a2a30"/>
+
+  <g clip-path="url(#frame)">
+    <!-- top hairline, mirrors the app's header line -->
+    <rect x="1" y="1" width="1198" height="3" fill="url(#hairline)"/>
+
+    <!-- decorative brand slashes, left -->
+    <g transform="translate(-150,-60) scale(8.2)" opacity="0.09">
+      <path d="M36 8 L48 8 L26 56 L14 56 Z" fill="#fb923c"/>
+      <path d="M52 8 L58 8 L36 56 L30 56 Z" fill="#38bdf8"/>
+    </g>
+    <!-- decorative brand slashes, right -->
+    <g transform="translate(890,-90) scale(8.2)" opacity="0.09">
+      <path d="M36 8 L48 8 L26 56 L14 56 Z" fill="#fb923c"/>
+      <path d="M52 8 L58 8 L36 56 L30 56 Z" fill="#38bdf8"/>
+    </g>
+  </g>
+
+  <!-- app mark -->
+  <g transform="translate(572,28) scale(0.875)">
+    <rect width="64" height="64" rx="14" fill="#28282e"/>
+    <path d="M36 8 L48 8 L26 56 L14 56 Z" fill="#fb923c"/>
+    <path d="M52 8 L58 8 L36 56 L30 56 Z" fill="#38bdf8"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="600" y="121" text-anchor="middle" font-size="14" font-weight="600" letter-spacing="5" fill="#fb923c">FORZA HORIZON 6 &#183; LIVE TELEMETRY</text>
+  <text x="600" y="186" text-anchor="middle" font-size="56" font-weight="800" font-style="italic" letter-spacing="2" fill="#e7e5e2">FORZA TUNING ADVISOR</text>
+  <!-- x compensates the skewX shift (tan 14deg * y) so the bar sits centered -->
+  <rect x="619" y="202" width="64" height="5" rx="2.5" fill="url(#stripe)" transform="skewX(-14)"/>
+
+  <text x="600" y="242" text-anchor="middle" font-size="19" fill="#a3a09a">Drive. Your car&#8217;s telemetry turns into concrete setup fixes.</text>
+
+  <!-- fact pills -->
+  <g font-family="Cascadia Mono, Consolas, ui-monospace, monospace" font-size="12.5">
+    <rect x="365" y="262" width="96" height="26" rx="13" fill="#fb923c" fill-opacity="0.14"/>
+    <text x="413" y="279" text-anchor="middle" fill="#fb923c">UDP :5300</text>
+    <rect x="473" y="262" width="170" height="26" rx="13" fill="#38bdf8" fill-opacity="0.14"/>
+    <text x="558" y="279" text-anchor="middle" fill="#38bdf8">ws://127.0.0.1:5301</text>
+    <rect x="655" y="262" width="180" height="26" rx="13" fill="#a3a09a" fill-opacity="0.16"/>
+    <text x="745" y="279" text-anchor="middle" fill="#a3a09a">100% on your machine</text>
+  </g>
+</svg>

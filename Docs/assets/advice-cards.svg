@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 236" font-family="Titillium Web, Segoe UI, system-ui, sans-serif">
+
+  <!-- card 1: a measured change (amber accent) with one-click Apply -->
+  <g transform="translate(24,10)">
+    <rect x="0.5" y="0.5" width="367" height="215" rx="8" fill="#0f0e0a" stroke="#2a2a30"/>
+    <rect x="1" y="1" width="3" height="214" rx="1.5" fill="#eec825"/>
+    <text x="18" y="30" font-size="12.5" font-weight="600" fill="#a3a09a">Anti-roll bars &#183; mid-corner</text>
+    <text x="350" y="30" text-anchor="end" font-size="13" fill="#a3a09a">&#9432;</text>
+    <text x="18" y="60" font-size="15.5" font-weight="700" fill="#e7e5e2">Front ARB 38.0 &#8594; 33.5</text>
+    <rect x="18" y="76" width="332" height="4" rx="2" fill="#2a2a30"/>
+    <rect x="138" y="76" width="100" height="4" rx="2" fill="#eec825" fill-opacity="0.55"/>
+    <circle cx="238" cy="78" r="5" fill="#47474d"/>
+    <circle cx="138" cy="78" r="5.5" fill="#eec825"/>
+    <line x1="18" y1="98" x2="350" y2="98" stroke="#2a2a30"/>
+    <text x="18" y="120" font-size="9.5" font-weight="700" letter-spacing="1" fill="#fb923c">WHY</text>
+    <text x="52" y="120" font-size="12.5" fill="#a3a09a">Front tires carry 1.6&#176; more slip than the</text>
+    <text x="18" y="138" font-size="12.5" fill="#a3a09a">rears through 14 measured corners.</text>
+    <text x="18" y="162" font-size="9.5" font-weight="700" letter-spacing="1" fill="#fb923c">OUTCOME</text>
+    <text x="82" y="162" font-size="12.5" fill="#a3a09a">More front bite without losing the rear.</text>
+    <rect x="264" y="178" width="86" height="26" rx="13" fill="#5c2d0d"/>
+    <text x="307" y="195" text-anchor="middle" font-size="12" font-weight="700" fill="#ffdcc2">Apply 33.5</text>
+  </g>
+
+  <!-- card 2: a noisier signal (sky accent + estimate chip) -->
+  <g transform="translate(416,10)">
+    <rect x="0.5" y="0.5" width="367" height="215" rx="8" fill="#0b0e10" stroke="#2a2a30"/>
+    <rect x="1" y="1" width="3" height="214" rx="1.5" fill="#38bdf8"/>
+    <text x="18" y="30" font-size="12.5" font-weight="600" fill="#a3a09a">Rear damping</text>
+    <rect x="200" y="13" width="124" height="20" rx="10" fill="#a3a09a" fill-opacity="0.16"/>
+    <text x="262" y="27" text-anchor="middle" font-size="9.5" font-weight="600" letter-spacing="0.8" fill="#a3a09a">EDUCATED ESTIMATE</text>
+    <text x="350" y="30" text-anchor="end" font-size="13" fill="#a3a09a">&#9432;</text>
+    <text x="18" y="60" font-size="15.5" font-weight="700" fill="#e7e5e2">Rear rebound 6.0 &#8594; 7.5</text>
+    <rect x="18" y="76" width="332" height="4" rx="2" fill="#2a2a30"/>
+    <rect x="170" y="76" width="90" height="4" rx="2" fill="#38bdf8" fill-opacity="0.5"/>
+    <circle cx="170" cy="78" r="5" fill="#47474d"/>
+    <circle cx="260" cy="78" r="5.5" fill="#38bdf8"/>
+    <line x1="18" y1="98" x2="350" y2="98" stroke="#2a2a30"/>
+    <text x="18" y="120" font-size="9.5" font-weight="700" letter-spacing="1" fill="#fb923c">WHY</text>
+    <text x="52" y="120" font-size="12.5" fill="#a3a09a">The rear keeps oscillating &#8776; 2.3&#215;/s after</text>
+    <text x="18" y="138" font-size="12.5" fill="#a3a09a">crests; rough-surface frames excluded.</text>
+    <text x="18" y="162" font-size="9.5" font-weight="700" letter-spacing="1" fill="#fb923c">OUTCOME</text>
+    <text x="82" y="162" font-size="12.5" fill="#a3a09a">The rear settles in one stroke, no float.</text>
+    <rect x="272" y="178" width="78" height="26" rx="13" fill="#5c2d0d"/>
+    <text x="311" y="195" text-anchor="middle" font-size="12" font-weight="700" fill="#ffdcc2">Apply 7.5</text>
+  </g>
+
+  <!-- card 3a: a verified lever (green accent) -->
+  <g transform="translate(808,10)">
+    <rect x="0.5" y="0.5" width="367" height="101" rx="8" fill="#0b0f0c" stroke="#2a2a30"/>
+    <rect x="1" y="1" width="3" height="100" rx="1.5" fill="#34d058"/>
+    <text x="18" y="30" font-size="12.5" font-weight="600" fill="#a3a09a">Brakes &#183; balance</text>
+    <circle cx="342" cy="26" r="4.5" fill="#34d058"/>
+    <text x="18" y="60" font-size="14" font-weight="600" fill="#e7e5e2">No front lockups in 214 braking zones</text>
+    <text x="18" y="84" font-size="12" fill="#a3a09a">pressure and balance verified under threshold braking</text>
+  </g>
+
+  <!-- card 3b: a lever edited since the last drive (stale, dashed) -->
+  <g transform="translate(808,124)">
+    <rect x="0.5" y="0.5" width="367" height="101" rx="8" fill="#0b0e10" stroke="#2a2a30" stroke-dasharray="5 4"/>
+    <rect x="1" y="1" width="3" height="100" rx="1.5" fill="#38bdf8"/>
+    <text x="18" y="30" font-size="12.5" font-weight="600" fill="#a3a09a">Front springs</text>
+    <rect x="252" y="13" width="78" height="20" rx="10" fill="#38bdf8" fill-opacity="0.14"/>
+    <text x="291" y="27" text-anchor="middle" font-size="9.5" font-weight="700" letter-spacing="0.8" fill="#38bdf8">CHANGED</text>
+    <text x="18" y="60" font-size="13.5" font-weight="600" fill="#a3a09a">drive to re-measure</text>
+    <text x="18" y="84" font-size="12" fill="#a3a09a">a fresh session replaces the stale measurements</text>
+  </g>
+</svg>
