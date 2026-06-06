@@ -2365,6 +2365,7 @@ select:focus-visible,
 .entry-pipesec,
 .entry-steps,
 .entry-features,
+.entry-why,
 .entry-faq {
   background: var(--surface-container-low);
   border-radius: var(--shape-md);
@@ -2734,6 +2735,42 @@ select:focus-visible,
   margin: 0;
   font-size: 13px;
   color: var(--on-surface-variant);
+}
+
+/* ---- why measured advice beats shared tunes ---- */
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+.why-card {
+  padding: 14px 16px;
+  background: var(--surface-container-high);
+  border-radius: var(--shape-sm);
+  border-left: 3px solid var(--outline);
+}
+.why-card.own {
+  border-left-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 5%, var(--surface-container-high));
+}
+.why-card h3 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 14px;
+}
+.why-card ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--on-surface-variant);
+}
+.why-caveat {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 /* ---- FAQ ---- */

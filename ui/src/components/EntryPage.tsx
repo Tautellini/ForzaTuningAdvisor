@@ -172,6 +172,42 @@ export function EntryPage({
         </div>
       </section>
 
+      {/* ---- why measured advice beats shared tunes ----------------------- */}
+      <section className="entry-why" aria-label="Why measured advice">
+        <h2>Why not just download a tune?</h2>
+        <div className="why-grid">
+          <div className="why-card">
+            <h3>Tunes you can find</h3>
+            <ul>
+              <li>
+                Leaderboard meta: bars at 1/1, springs on the minimum stop, ride height maxed.
+                Wins a speed trap, hates a corner.
+              </li>
+              <li>
+                Generic guide values, the same numbers for every car regardless of weight,
+                drivetrain or balance.
+              </li>
+              <li>Locked to their creator in-game, so you can't look inside the good ones to learn.</li>
+            </ul>
+          </div>
+          <div className="why-card own">
+            <h3>What your telemetry says</h3>
+            <ul>
+              <li>Measured from your car, your build, on the surface you actually race.</li>
+              <li>
+                Every card names the lever, the direction and, with your sheet entered, the exact
+                value.
+              </li>
+              <li>Data has no opinion: each verdict shows the evidence that triggered it.</li>
+            </ul>
+          </div>
+        </div>
+        <p className="why-caveat">
+          It's still a game and telemetry isn't a perfect picture of real car behavior. Treat the
+          advice as a well-founded direction, not a lap-time guarantee.
+        </p>
+      </section>
+
       {/* ---- FAQ (mirrors the FAQPage structured data in index.html) ------ */}
       <section className="entry-faq">
         <h2>Questions</h2>
