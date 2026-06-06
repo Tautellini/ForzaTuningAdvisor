@@ -24,6 +24,16 @@ Drive for a few minutes. The advisor reads the telemetry stream Forza Horizon 6 
   <sub>The card states: a measured change with one-click Apply &nbsp;·&nbsp; a noisier signal, flagged honestly &nbsp;·&nbsp; a verified lever &nbsp;·&nbsp; a lever you just edited (advice pauses until fresh driving re-measures it)</sub>
 </div>
 
+## Why this exists
+
+There is no shortage of shared tunes, in game and online. But most of what you find is leaderboard meta: anti-roll bars at 1/1, springs on the minimum stop, ride height maxed, tire pressures far outside any sane window. Built to win a speed trap, miserable to race through corners with an A700, S1 or S2 build.
+
+Most of the rest are generic guide values, the same numbers recommended for every car regardless of weight, drivetrain or balance. Unless you already have a trusted source, a tune that respects the actual car is hard to come by. And Forza itself does not help you learn: shared tunes are locked to their creator, so you cannot even look inside the good ones.
+
+This tool attacks the gap from the other side. Instead of copying someone's idea of what is "intended to be good", it measures what your car actually does, with your build, on your surface, and points at the lever that fixes it. Measured data does not lie and has no opinion.
+
+It is still a game, and the telemetry is not a perfect picture of real car behavior. Treat the advice as a well-founded indicator of the right direction, backed by evidence you can see, not as a lap-time guarantee.
+
 ## How it works
 
 Browsers cannot receive UDP, so one small script does the only thing the page can't:
